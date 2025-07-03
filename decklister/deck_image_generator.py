@@ -193,7 +193,7 @@ class DeckImageGenerator:
         all_forbidden_areas += frame_forbidden_areas
         self.config.forbidden_areas = all_forbidden_areas
 
-    def _find_optimal_card_size(self, deck, num_cards, img_width, img_height, frame_thickness, aspect_ratio, padding):
+    def _find_optimal_card_size(self, deck, num_cards, img_width, img_height, frame_thickness, card_aspect_ratio, padding):
         """
         Finds the largest card size that allows all cards to fit, by:
         1. Trying the largest possible card size.
@@ -201,39 +201,28 @@ class DeckImageGenerator:
         3. If a layout fits, returns the card size and columns.
         4. If not, reduces card size and repeats.
         """
-        min_card_width = 10
+        
+        min_card_width = 50
         avail_width = img_width - 2 * frame_thickness
         avail_height = img_height - 2 * frame_thickness
 
         # Start with the largest possible card width that could fit at least one card per row
         max_card_width = avail_width
         for card_width in range(max_card_width, min_card_width - 1, -1):
-            card_height = int(card_width / aspect_ratio)
+            card_height = int(card_width / card_aspect_ratio)
             if card_height < min_card_width:
-                print(f"Rejected: card_width={card_width} card_height too small ({card_height})")
                 continue  # Skip if height is too small
 
             for cols in range(1, num_cards + 1):
-                rows = (num_cards + cols - 1) // cols
+                rows = int(cols * card_aspect_ratio)
+                if cols * rows < num_cards:
+                    continue  # Not enough cards can fit in this layout
                 total_width = cols * card_width + (cols - 1) * padding
                 total_height = rows * card_height + (rows - 1) * padding
 
                 if total_width > avail_width or total_height > avail_height:
-                    # print(f"Break: card_width={card_width}, cols={cols} grid too large ({total_width}x{total_height}) for available {avail_width}x{avail_height}")
-                    break  # No point in trying more columns for this card size
+                    break
 
-                test_positions = self.layout_manager.calculate_layout(
-                    deck, card_width, card_height, cols, padding, frame_thickness
-                )
-                all_in_bounds = all(
-                    0 <= y <= img_height - card_height and 0 <= x <= img_width - card_width
-                    for (x, y) in test_positions
-                )
-                if len(test_positions) < num_cards or not all_in_bounds:
-                    print(f"Rejected: card_width={card_width}, cols={cols} not all cards fit (positions={len(test_positions)}) or out of bounds")
-                    continue
-
-                print(f"Optimal found: card_width={card_width}, card_height={card_height}, cols={cols}")
                 return card_width, card_height, cols
 
         # If no layout found, raise error

@@ -8,6 +8,11 @@ class Config:
         self.foreground = foreground  # Can be a path to an image (may have alpha channel)
         self.leader_area = leader_area  # [x0, y0, x1, y1] or None
         self.base_area = base_area      # [x0, y0, x1, y1] or None
+        # add leader area and base area to forbidden areas
+        if self.leader_area:
+            self.forbidden_areas.append(self.leader_area)
+        if self.base_area:
+            self.forbidden_areas.append(self.base_area)
 
     @classmethod
     def from_file(cls, path):
