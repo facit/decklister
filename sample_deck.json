@@ -1,0 +1,118 @@
+{
+  "metadata": {
+    "name": "Clone and Dagger - Copy",
+    "author": "facit"
+  },
+  "leader": {
+    "id": "SHD_009",
+    "count": 1
+  },
+  "base": {
+    "id": "TWI_029",
+    "count": 1
+  },
+  "deck": [
+    {
+      "id": "SHD_102",
+      "count": 3
+    },
+    {
+      "id": "SHD_078",
+      "count": 3
+    },
+    {
+      "id": "SOR_125",
+      "count": 3
+    },
+    {
+      "id": "JTL_119",
+      "count": 3
+    },
+    {
+      "id": "SHD_174",
+      "count": 3
+    },
+    {
+      "id": "TWI_193",
+      "count": 3
+    },
+    {
+      "id": "JTL_096",
+      "count": 3
+    },
+    {
+      "id": "SHD_132",
+      "count": 2
+    },
+    {
+      "id": "SOR_119",
+      "count": 3
+    },
+    {
+      "id": "SHD_129",
+      "count": 3
+    },
+    {
+      "id": "SOR_199",
+      "count": 2
+    },
+    {
+      "id": "TWI_127",
+      "count": 3
+    },
+    {
+      "id": "JTL_198",
+      "count": 2
+    },
+    {
+      "id": "SOR_102",
+      "count": 3
+    },
+    {
+      "id": "JTL_245",
+      "count": 3
+    },
+    {
+      "id": "JTL_121",
+      "count": 2
+    },
+    {
+      "id": "SHD_105",
+      "count": 3
+    },
+    {
+      "id": "SOR_236",
+      "count": 3
+    }
+  ],
+  "sideboard": [
+    {
+      "id": "SOR_200",
+      "count": 3
+    },
+    {
+      "id": "JTL_204",
+      "count": 2
+    },
+    {
+      "id": "SHD_132",
+      "count": 1
+    },
+    {
+      "id": "SOR_199",
+      "count": 1
+    },
+    {
+      "id": "JTL_198",
+      "count": 1
+    },
+    {
+      "id": "JTL_121",
+      "count": 1
+    },
+    {
+      "id": "SOR_252",
+      "count": 1
+    }
+  ]
+}
