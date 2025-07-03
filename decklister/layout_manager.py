@@ -19,123 +19,254 @@ class Collision(Enum):
     INSIDE = 15
     SURROUNDED = 16
 
+class OffsetState():
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.to_the_left = False
+        self.to_the_right = False
+        self.up = False
+        self.down = False
+        self.current = None
+        self.old_left_x = None
+        self.old_top_y = None
+        self.old_right_x = None
+        self.old_bottom_y = None
+
+    def all_offsets(self):
+        return (self.to_the_left and self.to_the_right and
+                self.up and self.down)
+    
+    def __repr__(self):
+        return f"left:{self.to_the_left}, right:{self.to_the_right}, up:{self.up}, down:{self.down}"
+
 class LayoutManager:
     def __init__(self, config=None):
         # Store configuration, which may include forbidden areas
         self.config = config
 
-    def offset_to_the_left(self, input_left_x, input_right_x, forbidden_left_x):
-        offset = input_right_x - forbidden_left_x + 1
-        input_left_x = input_left_x - offset
-        input_right_x = input_right_x - offset
-        return input_left_x, input_right_x
+    def offset_to_the_left(self, offset_state, input_left_x, input_right_x, forbidden_left_x):
+        tmp_left_x = offset_state.old_left_x if offset_state.old_left_x is not None else input_left_x
+        tmp_right_x = offset_state.old_right_x if offset_state.old_right_x is not None else input_right_x
+        if offset_state.old_left_x is None:
+            offset_state.old_left_x = input_left_x
+        if offset_state.old_right_x is None:
+            offset_state.old_right_x = input_right_x
+        offset = tmp_right_x - forbidden_left_x + 1
+        tmp_left_x = tmp_left_x - offset
+        tmp_right_x = tmp_right_x - offset
+        offset_state.to_the_left = True
+        return tmp_left_x, tmp_right_x
 
-    def offset_to_the_right(self, input_left_x, input_right_x, forbidden_right_x):
-        offset = forbidden_right_x - input_left_x + 1
-        input_right_x = input_right_x + offset
-        input_left_x = input_left_x + offset
-        return input_left_x, input_right_x
+    def offset_to_the_right(self, offset_state, input_left_x, input_right_x, forbidden_right_x):
+        tmp_left_x = offset_state.old_left_x if offset_state.old_left_x is not None else input_left_x
+        tmp_right_x = offset_state.old_right_x if offset_state.old_right_x is not None else input_right_x
+        if offset_state.old_left_x is None:
+            offset_state.old_left_x = input_left_x
+        if offset_state.old_right_x is None:
+            offset_state.old_right_x = input_right_x
+        offset = forbidden_right_x - tmp_left_x + 1
+        tmp_right_x = tmp_right_x + offset
+        tmp_left_x = tmp_left_x + offset
+        offset_state.to_the_right = True
+        return tmp_left_x, tmp_right_x
     
-    def offset_up(self, input_top_y, input_bottom_y, forbidden_top_y):
-        offset = input_bottom_y - forbidden_top_y + 1
-        input_top_y = input_top_y - offset
-        input_bottom_y = input_bottom_y - offset
-        return input_top_y, input_bottom_y
+    def offset_up(self, offset_state, input_top_y, input_bottom_y, forbidden_top_y):
+        tmp_top_y = offset_state.old_top_y if offset_state.old_top_y is not None else input_top_y
+        tmp_bottom_y = offset_state.old_bottom_y if offset_state.old_bottom_y is not None else input_bottom_y
+        if offset_state.old_top_y is None:
+            offset_state.old_top_y = input_top_y
+        if offset_state.old_bottom_y is None:
+            offset_state.old_bottom_y = input_bottom_y
+        offset = tmp_bottom_y - forbidden_top_y + 1
+        tmp_top_y = tmp_top_y - offset
+        tmp_bottom_y = tmp_bottom_y - offset
+        offset_state.up = True
+        return tmp_top_y, tmp_bottom_y
 
-    def offset_down(self, input_top_y, input_bottom_y, forbidden_bottom_y):
-        offset = forbidden_bottom_y - input_top_y + 1
-        input_bottom_y = input_bottom_y + offset
-        input_top_y = input_top_y + offset
-        return input_top_y, input_bottom_y
+    def offset_down(self, offset_state, input_top_y, input_bottom_y, forbidden_bottom_y):
+        tmp_top_y = offset_state.old_top_y if offset_state.old_top_y is not None else input_top_y
+        tmp_bottom_y = offset_state.old_bottom_y if offset_state.old_bottom_y is not None else input_bottom_y
+        if offset_state.old_top_y is None:
+            offset_state.old_top_y = input_top_y
+        if offset_state.old_bottom_y is None:
+            offset_state.old_bottom_y = input_bottom_y
+        offset = forbidden_bottom_y - tmp_top_y + 1
+        tmp_bottom_y = tmp_bottom_y + offset
+        tmp_top_y = tmp_top_y + offset
+        offset_state.down = True
+        return tmp_top_y, tmp_bottom_y
     
+    def check_and_offset_right(self, offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y,
+                               forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y):
+        if offset_state.up and not offset_state.down:
+            input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+        elif offset_state.down and not offset_state.up:
+            input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+        elif offset_state.to_the_right:
+            if abs(input_top_y - forbidden_top_y) < abs(input_bottom_y - forbidden_bottom_y):
+                input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+            else:
+                input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+        elif offset_state.to_the_left:
+            input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x)
+        else:
+            input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+
+        return offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y
+    
+    def check_and_offset_left(self, offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y,
+                              forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y):
+        if offset_state.up and not offset_state.down:
+            input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+        elif offset_state.down and not offset_state.up:
+            input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+        elif offset_state.to_the_right:
+            if abs(input_top_y - forbidden_top_y) < abs(input_bottom_y - forbidden_bottom_y):
+                input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+            else:
+                input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+        elif offset_state.to_the_left:
+            input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+        else:
+            input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x)
+
+        return offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y
+
+    def check_and_offset_up(self, offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y,
+                            forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y):
+        if offset_state.to_the_left and not offset_state.to_the_right:
+            input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+        elif offset_state.to_the_right and not offset_state.to_the_left:
+            input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x) 
+        elif offset_state.down:
+            if abs(input_left_x - forbidden_left_x) < abs(input_right_x - forbidden_right_x):
+                input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+            else:
+                input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x)
+        elif offset_state.up:
+            input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+        else:
+            input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+
+        return offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y
+
+    def check_and_offset_down(self, offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y,
+                              forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y):
+        if offset_state.to_the_left and not offset_state.to_the_right:
+            input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+        elif offset_state.to_the_right and not offset_state.to_the_left:
+            input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x) 
+        elif offset_state.up:
+            if abs(input_left_x - forbidden_left_x) < abs(input_right_x - forbidden_right_x):
+                input_left_x, input_right_x = self.offset_to_the_right(offset_state, input_left_x, input_right_x, forbidden_right_x)
+            else:
+                input_left_x, input_right_x = self.offset_to_the_left(offset_state, input_left_x, input_right_x, forbidden_left_x)
+        elif offset_state.down:
+            input_top_y, input_bottom_y = self.offset_up(offset_state, input_top_y, input_bottom_y, forbidden_top_y)
+        else:
+            input_top_y, input_bottom_y = self.offset_down(offset_state, input_top_y, input_bottom_y, forbidden_bottom_y)
+
+        return offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y
+
     def find_collision(self, input_left_x, input_top_y, input_right_x, input_bottom_y):
         """
-        Check if a rectangle collisions any forbidden area.
-        Returns True if there is collision.
+        Check if a rectangle collides with any forbidden area.
         """
         # If no config or forbidden areas, always allow placement
         if not self.config or not self.config.forbidden_areas:
             return (input_left_x, input_top_y, input_right_x, input_bottom_y)
         # Check each forbidden area for collision
         for area in self.config.forbidden_areas:
+            print("new area")
+            print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
             forbidden_left_x, forbidden_top_y, forbidden_right_x, forbidden_bottom_y = area
             
             # Check if the input rectangle collisions with the forbidden area
-            collisionping_edge = self.check_collision((input_left_x, input_top_y, input_right_x, input_bottom_y),
+            collision_edge = self.check_collision((input_left_x, input_top_y, input_right_x, input_bottom_y),
                                 (forbidden_left_x, forbidden_top_y, forbidden_right_x, forbidden_bottom_y))
             # Calculate new position to avoid collision
 
-            if collisionping_edge != Collision.NONE:
-                if collisionping_edge == Collision.LEFT:
-                    input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
-                elif collisionping_edge == Collision.RIGHT:
-                    input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
-                elif collisionping_edge == Collision.TOP:
-                    input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
-                elif collisionping_edge == Collision.BOTTOM:
-                    input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                # For any collision that has more than one edge collisionping, we will find the movement that is the least pixels
-                elif collisionping_edge == Collision.LEFT_AND_RIGHT:
+            offset_state = OffsetState()
+
+            while collision_edge != Collision.NONE:
+                if offset_state.all_offsets():
+                    # We have an error if we have already offset in all directions
+                    raise ValueError("Cannot resolve collision, already offset in all directions.")
+                
+                if collision_edge == Collision.LEFT:
+                    offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.RIGHT:
+                    offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.TOP:
+                    offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_up(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.BOTTOM:
+                    offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                # For any collision that has more than one edge collision, we will find the movement that is the least pixels
+                elif collision_edge == Collision.LEFT_AND_RIGHT:
                     # Move to the right if the left edge is closer to the forbidden area
-                    if abs(input_left_x - forbidden_left_x) < abs(input_right_x - forbidden_right_x):
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
+                    if offset_state.current == "to_the_right" or abs(input_left_x - forbidden_left_x) < abs(input_right_x - forbidden_right_x):
+                        offset_state.current = "to_the_right"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
-                elif collisionping_edge == Collision.TOP_AND_BOTTOM:
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.TOP_AND_BOTTOM:
                     # Move down if the top edge is closer to the forbidden area
-                    if abs(input_top_y - forbidden_top_y) < abs(input_bottom_y - forbidden_bottom_y):
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
+                    if offset_state.current == "down" or abs(input_top_y - forbidden_top_y) < abs(input_bottom_y - forbidden_bottom_y):
+                        offset_state.current = "down"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
-                elif collisionping_edge == Collision.TOP_LEFT:
-                    # Move right if the left edge is closer to the forbidden area
-                    if abs(input_left_x - forbidden_left_x) < abs(input_top_y - forbidden_top_y):
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_up(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.TOP_LEFT:
+                    if offset_state.current == "to_the_left" or abs(input_left_x - forbidden_left_x) < abs(input_top_y - forbidden_top_y):
+                        offset_state.current = "to_the_left"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
-                elif collisionping_edge == Collision.TOP_RIGHT:
-                    # Move left if the right edge is closer to the forbidden area
-                    if abs(input_right_x - forbidden_right_x) < abs(input_top_y - forbidden_top_y):
-                        input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_up(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.TOP_RIGHT:
+                    if offset_state.current == "to_the_right" or abs(input_right_x - forbidden_right_x) < abs(input_top_y - forbidden_top_y):
+                        offset_state.current = "to_the_right"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
-                elif collisionping_edge == Collision.BOTTOM_LEFT:
-                    # Move right if the left edge is closer to the forbidden area
-                    if abs(input_left_x - forbidden_left_x) < abs(input_bottom_y - forbidden_bottom_y):
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.BOTTOM_LEFT:
+                    if offset_state.current == "to_the_left" or abs(input_left_x - forbidden_left_x) < abs(input_bottom_y - forbidden_bottom_y):
+                        offset_state.current = "to_the_left"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                elif collisionping_edge == Collision.BOTTOM_RIGHT:
-                    # Move left if the right edge is closer to the forbidden area
-                    if abs(input_right_x - forbidden_right_x) < abs(input_bottom_y - forbidden_bottom_y):
-                        input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.BOTTOM_RIGHT:
+                    if offset_state.current == "to_the_right" or abs(input_right_x - forbidden_right_x) < abs(input_bottom_y - forbidden_bottom_y):
+                        offset_state.current = "to_the_right"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                elif collisionping_edge == Collision.TOP_LEFT_AND_RIGHT:
-                    # Move down if the top edge is closer to the forbidden area
-                    if abs(input_top_y - forbidden_top_y) < abs(input_left_x - forbidden_left_x):
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.TOP_LEFT_AND_RIGHT:
+                    if offset_state.current == "up" or abs(input_top_y - forbidden_top_y) < abs(input_left_x - forbidden_left_x):
+                        offset_state.current = "up"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_up(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
-                elif collisionping_edge == Collision.BOTTOM_LEFT_AND_RIGHT:
-                    # Move up if the bottom edge is closer to the forbidden area
-                    if abs(input_bottom_y - forbidden_bottom_y) < abs(input_left_x - forbidden_left_x):
-                        input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.BOTTOM_LEFT_AND_RIGHT:
+                    if offset_state.current == "down" or abs(input_bottom_y - forbidden_bottom_y) < abs(input_left_x - forbidden_left_x):
+                        offset_state.current = "down"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
-                elif collisionping_edge == Collision.LEFT_TOP_AND_BOTTOM:
-                    # Move right if the left edge is closer to the forbidden area
-                    if abs(input_left_x - forbidden_left_x) < abs(input_top_y - forbidden_top_y):
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.LEFT_TOP_AND_BOTTOM:
+                    if offset_state.current == "to_the_left" or abs(input_left_x - forbidden_left_x) < abs(input_top_y - forbidden_top_y):
+                        offset_state.current = "to_the_left"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                elif collisionping_edge == Collision.RIGHT_TOP_AND_BOTTOM:
-                    # Move left if the right edge is closer to the forbidden area
-                    if abs(input_right_x - forbidden_right_x) < abs(input_top_y - forbidden_top_y):
-                        input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.RIGHT_TOP_AND_BOTTOM:
+                    if offset_state.current == "to_the_right" or abs(input_right_x - forbidden_right_x) < abs(input_top_y - forbidden_top_y):
+                        offset_state.current = "to_the_right"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
                     else:
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                elif collisionping_edge == Collision.SURROUNDED or collisionping_edge == Collision.INSIDE:
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                elif collision_edge == Collision.SURROUNDED or collision_edge == Collision.INSIDE:
                     # If the rectangle is surrounded, we can move it in any direction.
                     # Find the shorter direction to move it out of the forbidden area
                     left_distance = abs(input_left_x - forbidden_left_x)
@@ -144,15 +275,28 @@ class LayoutManager:
                     bottom_distance = abs(input_bottom_y - forbidden_bottom_y)
                     # Find the minimum distance to move
                     min_distance = min(left_distance, right_distance, top_distance, bottom_distance)
-                    if min_distance == left_distance:
-                        input_left_x, input_right_x = self.offset_to_the_right(input_left_x, input_right_x, forbidden_right_x)
-                    elif min_distance == right_distance:
-                        input_left_x, input_right_x = self.offset_to_the_left(input_left_x, input_right_x, forbidden_left_x)
-                    elif min_distance == top_distance:
-                        input_top_y, input_bottom_y = self.offset_down(input_top_y, input_bottom_y, forbidden_bottom_y)
-                    elif min_distance == bottom_distance:
-                        input_top_y, input_bottom_y = self.offset_up(input_top_y, input_bottom_y, forbidden_top_y)
-        
+                    if offset_state.current == "to_the_right" or min_distance == left_distance:
+                        offset_state.current = "to_the_right"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_right(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                    elif offset_state.current == "to_the_left" or min_distance == right_distance:
+                        offset_state.current = "to_the_left"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_left(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                    elif offset_state.current == "down" or min_distance == top_distance:
+                        offset_state.current = "down"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_down(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+                    elif offset_state.current == "up" or min_distance == bottom_distance:
+                        offset_state.current = "up"
+                        offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y = self.check_and_offset_up(offset_state, input_left_x, input_right_x, input_top_y, input_bottom_y, forbidden_left_x, forbidden_right_x, forbidden_top_y, forbidden_bottom_y)
+
+                new_collision_edge = self.check_collision((input_left_x, input_top_y, input_right_x, input_bottom_y),
+                                    (forbidden_left_x, forbidden_top_y, forbidden_right_x, forbidden_bottom_y))
+                if new_collision_edge == Collision.NONE:
+                    print("breaking")
+                    print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
+                    offset_state.reset()
+                    break
+
+        print((input_left_x, input_top_y, input_right_x, input_bottom_y,))
         return (input_left_x, input_top_y, input_right_x, input_bottom_y)
 
     def check_collision(self, area1, area2):
