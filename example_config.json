@@ -1,0 +1,14 @@
+{
+  "resolution": [1920, 1080],
+  "forbidden_areas": [
+    [1560, 760, 1870, 980],
+    [0, 980, 1920, 1080]
+  ],
+  "background": "TNT-background.png",
+  "foreground": "deck vid border.png",
+  "leader_area": [70, 90, 336, 280],
+  "base_area": [70, 290, 336, 470],
+  "deck_area": [386, 90, 1870, 750],
+  "sb_area": [386, 580, 1550, 980],
+  "count_background": "count_background.png"
+}
