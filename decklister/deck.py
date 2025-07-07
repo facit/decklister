@@ -35,23 +35,31 @@ class Deck:
         - To support additional deck sections (e.g., commander), add new attributes and parsing logic.
         - Ensure the JSON structure matches the expected format for correct parsing.
     """
-    def __init__(self, main_deck=None, sideboard=None, leader_card=None, base_card=None):
+    def __init__(self, main_deck=None, sideboard=None, leader_card=None, second_leader_card=None, base_card=None):
         self.main_deck = main_deck if main_deck else []
         self.sideboard = sideboard if sideboard else []
         self.leader_card = leader_card if leader_card else None
+        self.second_leader_card = second_leader_card if second_leader_card else None
         self.base_card = base_card if base_card else None
 
     @classmethod
     def from_json(cls, json_data):
-        leader_card = Card(json_data.get("leader", []))
-        base_card = Card(json_data.get("base", []))
+        leader_card = json_data.get("leader")
+        if leader_card is not None:
+            leader_card = Card(leader_card)
+        second_leader_card = json_data.get("secondleader")
+        if second_leader_card is not None:
+            second_leader_card = Card(second_leader_card)
+        base_card = json_data.get("base")
+        if base_card is not None:
+            base_card = Card(base_card)
         main_deck = []
         sideboard = []
         for card_json in json_data.get("deck", []):
             main_deck.append(Card(card_json))
         for card_json in json_data.get("sideboard", []):
             sideboard.append(Card(card_json))
-        return cls(main_deck, sideboard, leader_card, base_card)
+        return cls(main_deck, sideboard, leader_card, second_leader_card, base_card)
 
     @classmethod
     def from_json_file(cls, path):

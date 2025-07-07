@@ -176,13 +176,19 @@ class DeckImageGenerator:
             background.paste(card_img, (x, y))
 
         # Place leader card
-        if deck.leader_card is not None and self.config.leader_area is not None:
-            lx0, ly0, lx1, ly1 = self.config.leader_area
-            leader_width, leader_height = lx1 - lx0, ly1 - ly0
-            leader_filename = f"{card_images_dir}/{deck.leader_card.card_set}/{deck.leader_card.card_number}.png"
-            # print(f"Loading leader card from {leader_filename}")
-            leader_img = Image.open(leader_filename).resize((leader_width, leader_height))
-            background.paste(leader_img, (lx0, ly0))
+        if deck.leader_card is not None and self.config.leader_areas is not None:
+            first_leader = True
+            for leader_area in self.config.leader_areas:
+                lx0, ly0, lx1, ly1 = leader_area
+                leader_width, leader_height = lx1 - lx0, ly1 - ly0
+                if first_leader:
+                    leader_filename = f"{card_images_dir}/{deck.leader_card.card_set}/{deck.leader_card.card_number}.png"
+                else:
+                    leader_filename = f"{card_images_dir}/{deck.second_leader_card.card_set}/{deck.second_leader_card.card_number}.png"
+                # print(f"Loading leader card from {leader_filename}")
+                leader_img = Image.open(leader_filename).resize((leader_width, leader_height))
+                background.paste(leader_img, (lx0, ly0))
+                first_leader = False
 
         # Place base card
         if deck.base_card is not None and self.config.base_area is not None:
@@ -220,8 +226,8 @@ class DeckImageGenerator:
             [img_width - frame_thickness, 0, img_width, img_height],
         ]
         all_forbidden_areas = list(self.config.forbidden_areas)
-        if self.config.leader_area:
-            all_forbidden_areas.append(self.config.leader_area)
+        if self.config.leader_areas:
+            all_forbidden_areas.extend(self.config.leader_areas)
         if self.config.base_area:
             all_forbidden_areas.append(self.config.base_area)
         all_forbidden_areas += frame_forbidden_areas
@@ -366,11 +372,19 @@ class DeckImageGenerator:
     def _draw_leader_and_base(self, background, deck):
         card_images_dir = "images"
         # Place leader card
-        if deck.leader_card is not None and self.config.leader_area:
-            lx0, ly0, lx1, ly1 = self.config.leader_area
+        if deck.leader_card is not None and self.config.leader_areas and len(self.config.leader_areas) > 0:
+            lx0, ly0, lx1, ly1 = self.config.leader_areas[0]
             leader_width, leader_height = lx1 - lx0, ly1 - ly0
             leader_filename = f"{card_images_dir}/{deck.leader_card.card_set}/{deck.leader_card.card_number}.png"
             print(f"Loading leader card from {leader_filename}")
+            leader_img = Image.open(leader_filename).resize((leader_width, leader_height))
+            background.paste(leader_img, (lx0, ly0))
+
+        if deck.second_leader_card is not None and self.config.leader_areas and len(self.config.leader_areas) > 1:
+            lx0, ly0, lx1, ly1 = self.config.leader_areas[1]
+            leader_width, leader_height = lx1 - lx0, ly1 - ly0
+            leader_filename = f"{card_images_dir}/{deck.second_leader_card.card_set}/{deck.second_leader_card.card_number}.png"
+            print(f"Loading second leader card from {leader_filename}")
             leader_img = Image.open(leader_filename).resize((leader_width, leader_height))
             background.paste(leader_img, (lx0, ly0))
 

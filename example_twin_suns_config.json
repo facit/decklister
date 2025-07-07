@@ -6,8 +6,8 @@
   ],
   "background": "TNT-background.png",
   "foreground": "deck vid border.png",
-  "leader_areas": [[70, 90, 336, 280]],
-  "base_area": [70, 290, 336, 470],
+  "leader_areas": [[70, 90, 336, 280], [70, 290, 336, 470]],
+  "base_area": [70, 490, 336, 670],
   "deck_area": [386, 90, 1870, 750],
   "sb_area": [386, 580, 1550, 980],
   "count_background": "count_background.png"
