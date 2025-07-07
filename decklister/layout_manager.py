@@ -179,8 +179,8 @@ class LayoutManager:
             return (input_left_x, input_top_y, input_right_x, input_bottom_y)
         # Check each forbidden area for collision
         for area in self.config.forbidden_areas:
-            print("new area")
-            print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
+            # print("new area")
+            # print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
             forbidden_left_x, forbidden_top_y, forbidden_right_x, forbidden_bottom_y = area
             
             # Check if the input rectangle collisions with the forbidden area
@@ -291,12 +291,12 @@ class LayoutManager:
                 new_collision_edge = self.check_collision((input_left_x, input_top_y, input_right_x, input_bottom_y),
                                     (forbidden_left_x, forbidden_top_y, forbidden_right_x, forbidden_bottom_y))
                 if new_collision_edge == Collision.NONE:
-                    print("breaking")
-                    print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
+                    # print("breaking")
+                    # print((input_left_x, input_top_y, input_right_x, input_bottom_y),)
                     offset_state.reset()
                     break
 
-        print((input_left_x, input_top_y, input_right_x, input_bottom_y,))
+        # print((input_left_x, input_top_y, input_right_x, input_bottom_y,))
         return (input_left_x, input_top_y, input_right_x, input_bottom_y)
 
     def check_collision(self, area1, area2):
@@ -371,28 +371,42 @@ class LayoutManager:
         if bottom_collision:
             return Collision.BOTTOM
 
-    def calculate_layout(self, deck, card_width, card_height, cards_per_row, padding, frame_thickness):
+    def calculate_layout(self, deck_area, sb_area, deck, card_width, card_height, cards_per_row, padding, frame_thickness):
         """
         Calculate (x, y) positions for each card in the deck's main_deck.
-        Ensures cards do not collision forbidden areas and are arranged in rows.
+        Ensures cards do not collide with forbidden areas and are arranged in rows.
         """
         positions = []
-        x, y = 0, 0
+        min_x = deck_area[0]
+        min_y = deck_area[1]
+        max_x = deck_area[2]
+        max_y = deck_area[3]
+        x, y = min_x, min_y
         for i, card in enumerate(deck.main_deck):
             if i > 0 and i % cards_per_row == 0:
-                x = 0
+                x = min_x
                 y += card_height + padding
+            if x + card_width > max_x or y + card_height > max_y:
+                print("Can't fit all cards!")
+                return None
 
-            # Calculate the position of the card
-            left_x = x + frame_thickness
-            top_y = y + frame_thickness
-            right_x = left_x + card_width - frame_thickness * 2
-            bottom_y = top_y + card_height - frame_thickness * 2
+            positions.append((x, y))
+            x += card_width + padding
 
-            # Check for collision with forbidden areas
-            left_x, top_y, right_x, bottom_y = self.find_collision(left_x, top_y, right_x, bottom_y)
+        min_x = sb_area[0]
+        min_y = sb_area[1]
+        max_x = sb_area[2]
+        max_y = sb_area[3]
+        x, y = min_x, min_y
+        for i, card in enumerate(deck.sideboard):
+            if i > 0 and i % cards_per_row == 0:
+                x = min_x
+                y += card_height + padding
+            if x + card_width > max_x or y + card_height > max_y:
+                print("Can't fit all cards!")
+                return None
 
-            positions.append((left_x, top_y))
+            positions.append((x, y))
             x += card_width + padding
 
         return positions

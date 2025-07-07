@@ -11,12 +11,14 @@ def main():
         background="TNT-background.png",
         foreground="deck vid border.png",
         forbidden_areas=[
-            [0, 680, 200, 880],
-            [1720, 880, 1920, 1080],
+            # [0, 680, 200, 880],
+            [1560, 760, 1870, 980],
             [0, 980, 1920, 1080],
         ],
         leader_area=[60, 80, l_b_width + 60, l_b_height + 80],
         base_area=[60, l_b_height + 90, l_b_width + 60, 2 * l_b_height + 90],
+        deck_area=[l_b_width + 80, 80, 1870, 750],
+        sb_area=[l_b_width + 80, 660, 1550, 980]
     )
     generator = DeckImageGenerator(config=config, blur_count_area=False)
     generator.run(deck_file)

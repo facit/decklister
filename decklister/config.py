@@ -1,6 +1,6 @@
 class Config:
     def __init__(self, resolution=(1920, 1080), forbidden_areas=None, background=None,
-                 foreground=None, leader_area=None, base_area=None):
+                 foreground=None, leader_area=None, base_area=None, deck_area=None, sb_area=None):
         self.resolution = resolution
         # forbidden_areas: list of rectangles [x0, y0, x1, y1]
         self.forbidden_areas = forbidden_areas if forbidden_areas else []
@@ -8,6 +8,8 @@ class Config:
         self.foreground = foreground  # Can be a path to an image (may have alpha channel)
         self.leader_area = leader_area  # [x0, y0, x1, y1] or None
         self.base_area = base_area      # [x0, y0, x1, y1] or None
+        self.deck_area = deck_area
+        self.sb_area = sb_area
         # add leader area and base area to forbidden areas
         if self.leader_area:
             self.forbidden_areas.append(self.leader_area)
