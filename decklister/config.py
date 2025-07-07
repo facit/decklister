@@ -1,3 +1,5 @@
+import json
+
 class Config:
     def __init__(self, resolution=(1920, 1080), forbidden_areas=None, background=None,
                  foreground=None, leader_area=None, base_area=None, deck_area=None, sb_area=None, count_background=None):
@@ -19,6 +21,16 @@ class Config:
 
     @classmethod
     def from_file(cls, path):
-        # print("Stub: Loading config from file (not implemented yet)")
-        # TODO: Implement config file loading
-        return cls()
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return cls(
+            resolution=tuple(data.get("resolution", (1920, 1080))),
+            forbidden_areas=data.get("forbidden_areas"),
+            background=data.get("background"),
+            foreground=data.get("foreground"),
+            leader_area=data.get("leader_area"),
+            base_area=data.get("base_area"),
+            deck_area=data.get("deck_area"),
+            sb_area=data.get("sb_area"),
+            count_background=data.get("count_background"),
+        )
