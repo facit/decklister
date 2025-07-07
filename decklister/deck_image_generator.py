@@ -120,7 +120,7 @@ class DeckImageGenerator:
             # Draw the card count (centered in the blurred area)
             draw = ImageDraw.Draw(card_img)
             try:
-                font = ImageFont.truetype("arial.ttf", 40)
+                font = ImageFont.truetype("arial.ttf", card_width/5)
             except Exception:
                 font = ImageFont.load_default()
             text = str(card.count)
@@ -140,6 +140,28 @@ class DeckImageGenerator:
 
             text_x = (card_width - text_width) // 2
 
+            # draw the self.config.count_background if it is defined
+            if self.config.count_background is not None:
+                count_bg = self.config.count_background
+                try:
+                    if isinstance(count_bg, str) and os.path.isfile(count_bg):
+                        count_bg_width = max(1, card_width // 5)
+                        # Scale the height of the count background to match the card
+                        # Keep the aspect ratio of the original image
+                        with Image.open(count_bg) as orig_bg_img:
+                            orig_w, orig_h = orig_bg_img.size
+                            aspect_ratio = orig_w / orig_h if orig_h != 0 else 1
+                            count_bg_height = int(card_width / 4)
+                            # Optionally, ensure the background doesn't get distorted too much
+                            count_bg_width = int(count_bg_height * aspect_ratio)
+                            # Center the count background horizontally
+                            count_bg_x = (card_width - count_bg_width) // 2
+                            count_bg_img = orig_bg_img.resize((count_bg_width, count_bg_height))
+                            card_img.paste(count_bg_img, (count_bg_x, card_height - count_bg_height), count_bg_img.convert("RGBA"))
+                except Exception as e:
+                    print(f"Failed to draw count background: {e}")
+
+            
             # Draw black outline for better readability
             outline_range = 2  # Outline thickness
             for ox in range(-outline_range, outline_range + 1):
@@ -154,7 +176,7 @@ class DeckImageGenerator:
             background.paste(card_img, (x, y))
 
         # Place leader card
-        if deck.leader_card is not None and self.config.leader_area:
+        if deck.leader_card is not None and self.config.leader_area is not None:
             lx0, ly0, lx1, ly1 = self.config.leader_area
             leader_width, leader_height = lx1 - lx0, ly1 - ly0
             leader_filename = f"{card_images_dir}/{deck.leader_card.card_set}/{deck.leader_card.card_number}.png"
@@ -163,7 +185,7 @@ class DeckImageGenerator:
             background.paste(leader_img, (lx0, ly0))
 
         # Place base card
-        if deck.base_card is not None and self.config.base_area:
+        if deck.base_card is not None and self.config.base_area is not None:
             bx0, by0, bx1, by1 = self.config.base_area
             base_width, base_height = bx1 - bx0, by1 - by0
             base_filename = f"{card_images_dir}/{deck.base_card.card_set}/{deck.base_card.card_number}.png"

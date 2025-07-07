@@ -1,6 +1,6 @@
 class Config:
     def __init__(self, resolution=(1920, 1080), forbidden_areas=None, background=None,
-                 foreground=None, leader_area=None, base_area=None, deck_area=None, sb_area=None):
+                 foreground=None, leader_area=None, base_area=None, deck_area=None, sb_area=None, count_background=None):
         self.resolution = resolution
         # forbidden_areas: list of rectangles [x0, y0, x1, y1]
         self.forbidden_areas = forbidden_areas if forbidden_areas else []
@@ -10,6 +10,7 @@ class Config:
         self.base_area = base_area      # [x0, y0, x1, y1] or None
         self.deck_area = deck_area
         self.sb_area = sb_area
+        self.count_background = count_background
         # add leader area and base area to forbidden areas
         if self.leader_area:
             self.forbidden_areas.append(self.leader_area)
@@ -18,6 +19,6 @@ class Config:
 
     @classmethod
     def from_file(cls, path):
-        print("Stub: Loading config from file (not implemented yet)")
+        # print("Stub: Loading config from file (not implemented yet)")
         # TODO: Implement config file loading
         return cls()

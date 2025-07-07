@@ -377,36 +377,39 @@ class LayoutManager:
         Ensures cards do not collide with forbidden areas and are arranged in rows.
         """
         positions = []
-        min_x = deck_area[0]
-        min_y = deck_area[1]
-        max_x = deck_area[2]
-        max_y = deck_area[3]
-        x, y = min_x, min_y
-        for i, card in enumerate(deck.main_deck):
-            if i > 0 and i % cards_per_row == 0:
-                x = min_x
-                y += card_height + padding
-            if x + card_width > max_x or y + card_height > max_y:
-                print("Can't fit all cards!")
-                return None
 
-            positions.append((x, y))
-            x += card_width + padding
+        if deck_area is not None:
+            min_x = deck_area[0]
+            min_y = deck_area[1]
+            max_x = deck_area[2]
+            max_y = deck_area[3]
+            x, y = min_x, min_y
+            for i, card in enumerate(deck.main_deck):
+                if i > 0 and i % cards_per_row == 0:
+                    x = min_x
+                    y += card_height + padding
+                if x + card_width > max_x or y + card_height > max_y:
+                    print("Can't fit all cards!")
+                    return None
 
-        min_x = sb_area[0]
-        min_y = sb_area[1]
-        max_x = sb_area[2]
-        max_y = sb_area[3]
-        x, y = min_x, min_y
-        for i, card in enumerate(deck.sideboard):
-            if i > 0 and i % cards_per_row == 0:
-                x = min_x
-                y += card_height + padding
-            if x + card_width > max_x or y + card_height > max_y:
-                print("Can't fit all cards!")
-                return None
+                positions.append((x, y))
+                x += card_width + padding
 
-            positions.append((x, y))
-            x += card_width + padding
+        if sb_area is not None:
+            min_x = sb_area[0]
+            min_y = sb_area[1]
+            max_x = sb_area[2]
+            max_y = sb_area[3]
+            x, y = min_x, min_y
+            for i, card in enumerate(deck.sideboard):
+                if i > 0 and i % cards_per_row == 0:
+                    x = min_x
+                    y += card_height + padding
+                if x + card_width > max_x or y + card_height > max_y:
+                    print("Can't fit all cards!")
+                    return None
+
+                positions.append((x, y))
+                x += card_width + padding
 
         return positions
