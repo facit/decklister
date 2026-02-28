@@ -14,8 +14,8 @@ import os
 
 block_cipher = None
 
-# Use SPECPATH (set by PyInstaller to the directory containing this spec file)
-SPEC_DIR = SPECPATH
+# Use the directory containing this spec file as the base for all paths
+SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
 
 a = Analysis(
     [os.path.join(SPEC_DIR, 'decklister', '__main__.py')],
