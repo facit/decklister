@@ -28,14 +28,30 @@ def clean():
 
 def build():
     """Run PyInstaller with the spec file."""
+    script_dir = os.path.dirname(os.path.abspath(__file__)) or "."
+    spec_file = os.path.join(script_dir, "decklister.spec")
+
     print(f"Building for {sys.platform}...")
+    print(f"Working directory: {script_dir}")
+    print(f"Spec file: {spec_file}")
+
+    # Verify key files exist
+    for f in ["decklister/__main__.py", "icon_256.png", "example_background.png"]:
+        full = os.path.join(script_dir, f)
+        print(f"  {'✓' if os.path.exists(full) else '✗'} {f}")
+
     result = subprocess.run(
-        [sys.executable, "-m", "PyInstaller", "decklister.spec", "--noconfirm"],
-        cwd=os.path.dirname(os.path.abspath(__file__)) or ".",
+        [sys.executable, "-m", "PyInstaller", spec_file, "--noconfirm"],
+        cwd=script_dir,
     )
     if result.returncode == 0:
         print("\nBuild successful!")
-        print(f"Output: dist/DeckLister{'.app' if sys.platform == 'darwin' else '.exe' if sys.platform == 'win32' else ''}")
+        if sys.platform == 'darwin':
+            print("Output: dist/DeckLister.app")
+        elif sys.platform == 'win32':
+            print("Output: dist/DeckLister.exe")
+        else:
+            print("Output: dist/DeckLister")
     else:
         print("\nBuild failed.", file=sys.stderr)
         sys.exit(1)
