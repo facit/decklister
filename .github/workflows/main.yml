@@ -12,10 +12,10 @@ jobs:
         include:
           - os: windows-latest
             artifact_name: DeckLister-Windows
-            exe_name: DeckLister.exe
+            exe_path: dist/DeckLister.exe
           - os: macos-latest
             artifact_name: DeckLister-macOS
-            exe_name: DeckLister
+            exe_path: dist/DeckLister.app
 
     runs-on: ${{ matrix.os }}
 
@@ -36,14 +36,18 @@ jobs:
       - name: Build executable
         run: python build.py
 
+      - name: Zip macOS app
+        if: runner.os == 'macOS'
+        run: cd dist && zip -r DeckLister-macOS.zip DeckLister.app
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}
-          path: dist/${{ matrix.exe_name }}
+          path: ${{ runner.os == 'macOS' && 'dist/DeckLister-macOS.zip' || matrix.exe_path }}
 
       - name: Upload to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ matrix.exe_name }}
+          files: ${{ runner.os == 'macOS' && 'dist/DeckLister-macOS.zip' || matrix.exe_path }}
