@@ -14,18 +14,21 @@ import os
 
 block_cipher = None
 
+# Use the directory containing this spec file as the base for all paths
+SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
+
 a = Analysis(
-    ['decklister/__main__.py'],
-    pathex=[],
+    [os.path.join(SPEC_DIR, 'decklister', '__main__.py')],
+    pathex=[SPEC_DIR],
     binaries=[],
     datas=[
-        ('icon_256.png', '.'),
-        ('icon_64.png', '.'),
-        ('icon.ico', '.'),
-        ('example_background.png', '.'),
-        ('example_foreground.png', '.'),
-        ('example_count_background.png', '.'),
-        ('example_config.json', '.'),
+        (os.path.join(SPEC_DIR, 'icon_256.png'), '.'),
+        (os.path.join(SPEC_DIR, 'icon_64.png'), '.'),
+        (os.path.join(SPEC_DIR, 'icon.ico'), '.'),
+        (os.path.join(SPEC_DIR, 'example_background.png'), '.'),
+        (os.path.join(SPEC_DIR, 'example_foreground.png'), '.'),
+        (os.path.join(SPEC_DIR, 'example_count_background.png'), '.'),
+        (os.path.join(SPEC_DIR, 'example_config.json'), '.'),
     ],
     hiddenimports=[
         'decklister',
@@ -71,7 +74,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='icon.ico' if sys.platform == 'win32' else 'icon_256.png',
+    icon=os.path.join(SPEC_DIR, 'icon.ico') if sys.platform == 'win32' else os.path.join(SPEC_DIR, 'icon_256.png'),
 )
 
 # macOS app bundle
@@ -79,7 +82,7 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         exe,
         name='DeckLister.app',
-        icon='icon_256.png',
+        icon=os.path.join(SPEC_DIR, 'icon_256.png'),
         bundle_identifier='com.decklister.app',
         info_plist={
             'CFBundleShortVersionString': '1.0.0',
