@@ -103,7 +103,7 @@ class DeckListerGUI(QMainWindow):
         self.config_drawer_btn.clicked.connect(self._open_config_drawer)
         actions_layout.addWidget(self.config_drawer_btn)
 
-        self.export_examples_btn = QPushButton("Save example files")
+        self.export_examples_btn = QPushButton("Export Examples")
         self.export_examples_btn.setMinimumHeight(40)
         self.export_examples_btn.clicked.connect(self._export_examples)
         actions_layout.addWidget(self.export_examples_btn)
@@ -236,14 +236,32 @@ class DeckListerGUI(QMainWindow):
     # --- Config Drawer ---
 
     def _open_config_drawer(self):
-        """Launch the config drawer as a separate process."""
+        """Launch the config drawer."""
         self._append_log("Opening Config Drawer...")
         try:
-            # Run as a subprocess so it doesn't block the main GUI
-            subprocess.Popen(
-                [sys.executable, "-m", "decklister.config_drawer"],
-                cwd=os.getcwd(),
-            )
+            if getattr(sys, 'frozen', False):
+                # Running as PyInstaller bundle — import and run directly in a thread
+                def run_drawer():
+                    try:
+                        import tkinter as tk
+                        try:
+                            from .config_drawer import AreaDrawer
+                        except ImportError:
+                            from decklister.config_drawer import AreaDrawer
+                        root = tk.Tk()
+                        AreaDrawer(root)
+                        root.mainloop()
+                    except Exception as e:
+                        self.log_signal.message.emit(f"Config Drawer error: {e}")
+
+                thread = threading.Thread(target=run_drawer, daemon=True)
+                thread.start()
+            else:
+                # Running in development — launch as subprocess
+                subprocess.Popen(
+                    [sys.executable, "-m", "decklister.config_drawer"],
+                    cwd=os.getcwd(),
+                )
         except Exception as e:
             self._append_log(f"Error launching Config Drawer: {e}")
 

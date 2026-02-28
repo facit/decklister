@@ -99,7 +99,7 @@ class Renderer:
             return
         img_path = self._card_image_path(card)
         try:
-            card_img = Image.open(img_path)
+            card_img = Image.open(img_path).convert("RGB")
             orig_w, orig_h = card_img.size
             if orig_w <= 0 or orig_h <= 0:
                 return
@@ -144,7 +144,7 @@ class Renderer:
         """Load and resize a card image, or return a placeholder."""
         img_path = self._card_image_path(card)
         try:
-            return Image.open(img_path).resize((width, height))
+            return Image.open(img_path).convert("RGB").resize((width, height))
         except Exception as e:
             print(f"Failed to load {img_path}: {e}")
             return Image.new("RGB", (width, height), (80, 80, 80))
