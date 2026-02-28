@@ -109,10 +109,10 @@ project/
 
 ## Deck Format
 
-Two formats are supported. You can use either the **list format** or the **legacy format** for leaders and bases, but not both in the same file.
+Two formats are supported. You can use either the **list format** or the **swudb format** for leaders and bases, but not both in the same file.
 
 ### List format
-
+This format allows you to show any number of leadera or bases (not just 1 or 2) 
 ```json
 {
   "metadata": {
@@ -136,8 +136,8 @@ Two formats are supported. You can use either the **list format** or the **legac
 }
 ```
 
-### Legacy format
-
+### Swudb format
+The format for json deck files on swudb.com
 ```json
 {
   "leader": { "id": "SHD_009", "count": 1 },
