@@ -1,65 +1,83 @@
 import json
 
+
 class Card:
     def __init__(self, card_json):
-        card_id=card_json.get("id")
+        card_id = card_json.get("id")
         card_set, card_number = card_id.split("_", 1)
-        self.card_set=card_set
-        self.card_number=card_number
-        self.count=card_json.get("count", 1)
-        
+        self.card_set = card_set
+        self.card_number = card_number
+        self.count = card_json.get("count", 1)
+
     def __repr__(self):
         return f"{self.count}x {self.card_set}_{self.card_number}"
 
+
 class Deck:
     """
-    Represents a deck of cards, including both the main deck and sideboard.
-    Attributes:
-        main_deck (list): List of Card objects in the main deck.
-        sideboard (list): List of Card objects in the sideboard.
-    Methods:
-        __init__(self, main_deck=None, sideboard=None):
-            Initializes a Deck instance with optional main_deck and sideboard lists.
-            If not provided, initializes as empty lists.
-        from_json(cls, json_data):
-            Class method to create a Deck instance from a JSON-like dictionary.
-            Expects 'deck' and 'sideboard' keys in the dictionary, each containing
-            a list of card dictionaries with 'id' (format: 'set_number') and optional 'count'.
-            Splits the 'id' to extract card_set and card_number for Card construction.
-        from_json_file(cls, path):
-            Class method to create a Deck instance from a JSON file.
-            Reads the file at the given path, loads the JSON data, and delegates
-            to from_json() for Deck construction.
-    Usage Notes:
-        - To add new fields to cards, update the Card class and adjust the from_json method accordingly.
-        - To support additional deck sections (e.g., commander), add new attributes and parsing logic.
-        - Ensure the JSON structure matches the expected format for correct parsing.
+    Represents a deck of cards with leaders, bases, main deck, and sideboard.
+
+    Supports two JSON formats:
+    - List format: "leaders": [...], "bases": [...]
+    - Legacy format: "leader": {...}, "secondleader": {...}, "base": {...}
+    Using both formats simultaneously for the same field is an error.
     """
-    def __init__(self, main_deck=None, sideboard=None, leader_card=None, second_leader_card=None, base_card=None):
-        self.main_deck = main_deck if main_deck else []
-        self.sideboard = sideboard if sideboard else []
-        self.leader_card = leader_card if leader_card else None
-        self.second_leader_card = second_leader_card if second_leader_card else None
-        self.base_card = base_card if base_card else None
+
+    def __init__(self, leaders=None, bases=None, main_deck=None, sideboard=None, metadata=None):
+        self.leaders = leaders or []
+        self.bases = bases or []
+        self.main_deck = main_deck or []
+        self.sideboard = sideboard or []
+        self.metadata = metadata or {}
 
     @classmethod
     def from_json(cls, json_data):
-        leader_card = json_data.get("leader")
-        if leader_card is not None:
-            leader_card = Card(leader_card)
-        second_leader_card = json_data.get("secondleader")
-        if second_leader_card is not None:
-            second_leader_card = Card(second_leader_card)
-        base_card = json_data.get("base")
-        if base_card is not None:
-            base_card = Card(base_card)
-        main_deck = []
-        sideboard = []
-        for card_json in json_data.get("deck", []):
-            main_deck.append(Card(card_json))
-        for card_json in json_data.get("sideboard", []):
-            sideboard.append(Card(card_json))
-        return cls(main_deck, sideboard, leader_card, second_leader_card, base_card)
+        # Parse metadata
+        metadata = json_data.get("metadata", {})
+
+        # Parse leaders
+        has_leaders_list = "leaders" in json_data
+        has_leader_singular = "leader" in json_data or "secondleader" in json_data
+
+        if has_leaders_list and has_leader_singular:
+            raise ValueError(
+                "Deck JSON cannot contain both 'leaders' and 'leader'/'secondleader'. "
+                "Use one format or the other."
+            )
+
+        leaders = []
+        if has_leaders_list:
+            for card_json in json_data["leaders"]:
+                leaders.append(Card(card_json))
+        elif has_leader_singular:
+            if json_data.get("leader") is not None:
+                leaders.append(Card(json_data["leader"]))
+            if json_data.get("secondleader") is not None:
+                leaders.append(Card(json_data["secondleader"]))
+
+        # Parse bases
+        has_bases_list = "bases" in json_data
+        has_base_singular = "base" in json_data
+
+        if has_bases_list and has_base_singular:
+            raise ValueError(
+                "Deck JSON cannot contain both 'bases' and 'base'. "
+                "Use one format or the other."
+            )
+
+        bases = []
+        if has_bases_list:
+            for card_json in json_data["bases"]:
+                bases.append(Card(card_json))
+        elif has_base_singular:
+            if json_data.get("base") is not None:
+                bases.append(Card(json_data["base"]))
+
+        # Parse main deck and sideboard
+        main_deck = [Card(c) for c in json_data.get("deck", [])]
+        sideboard = [Card(c) for c in json_data.get("sideboard", [])]
+
+        return cls(leaders, bases, main_deck, sideboard, metadata)
 
     @classmethod
     def from_json_file(cls, path):

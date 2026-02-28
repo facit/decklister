@@ -1,14 +1,12 @@
 {
   "resolution": [1920, 1080],
-  "forbidden_areas": [
-    [1560, 760, 1870, 980],
-    [0, 980, 1920, 1080]
-  ],
-  "background": "TNT-background.png",
-  "foreground": "deck vid border.png",
-  "leader_areas": [[70, 90, 336, 280]],
-  "base_area": [70, 290, 336, 470],
-  "deck_area": [386, 90, 1870, 750],
-  "sb_area": [386, 580, 1550, 980],
-  "count_background": "count_background.png"
+  "background": "example_background.png",
+  "foreground": "example_foreground.png",
+  "leader_areas": [[90, 90, 390, 290]],
+  "base_areas": [[90, 310, 390, 510]],
+  "deck_area": [430, 90, 1870, 720],
+  "sb_area": [430, 780, 1870, 1010],
+  "padding": 10,
+  "count_background": "example_count_background.png",
+  "uniform_card_size":true
 }
