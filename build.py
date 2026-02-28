@@ -38,7 +38,8 @@ def build():
     # Verify key files exist
     for f in ["decklister/__main__.py", "icon_256.png", "example_background.png"]:
         full = os.path.join(script_dir, f)
-        print(f"  {'✓' if os.path.exists(full) else '✗'} {f}")
+        mark = "OK" if os.path.exists(full) else "MISSING"
+        print(f"  [{mark}] {f}")
 
     result = subprocess.run(
         [sys.executable, "-m", "PyInstaller", spec_file, "--noconfirm"],
