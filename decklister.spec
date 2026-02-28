@@ -18,7 +18,7 @@ block_cipher = None
 SPEC_DIR = os.path.dirname(os.path.abspath(SPECPATH))
 
 a = Analysis(
-    [os.path.join(SPEC_DIR, 'decklister', '__main__.py')],
+    [os.path.join(SPEC_DIR, '__main__.py')],
     pathex=[SPEC_DIR],
     binaries=[],
     datas=[
