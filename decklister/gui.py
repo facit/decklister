@@ -5,7 +5,7 @@ import threading
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QLineEdit, QFileDialog, QTextEdit, QGroupBox,
-    QProgressBar,
+    QProgressBar, QCheckBox,
 )
 from PySide6.QtCore import Qt, Signal, QObject
 from PySide6.QtGui import QFont
@@ -85,6 +85,21 @@ class DeckListerGUI(QMainWindow):
         input_layout.addLayout(output_row)
 
         layout.addWidget(input_group)
+
+        # --- Variant Options ---
+        options_group = QGroupBox("Card Variants")
+        options_layout = QHBoxLayout(options_group)
+
+        self.hyperspace_check = QCheckBox("Hyperspace")
+        self.hyperspace_check.setToolTip("Use hyperspace variants for all cards")
+        options_layout.addWidget(self.hyperspace_check)
+
+        self.showcase_check = QCheckBox("Showcase leaders")
+        self.showcase_check.setToolTip("Use showcase variant art for leader cards (overrides hyperspace for leaders)")
+        options_layout.addWidget(self.showcase_check)
+
+        options_layout.addStretch()
+        layout.addWidget(options_group)
 
         # --- Actions ---
         actions_layout = QHBoxLayout()
@@ -180,15 +195,22 @@ class DeckListerGUI(QMainWindow):
         if output_file:
             self._append_log(f"  Output: {output_file}")
 
+        hyperspace = self.hyperspace_check.isChecked()
+        showcase = self.showcase_check.isChecked()
+        if hyperspace:
+            self._append_log("  Variant: Hyperspace")
+        if showcase:
+            self._append_log("  Variant: Showcase leaders")
+
         # Run in a thread to keep the GUI responsive
         thread = threading.Thread(
             target=self._run_generator,
-            args=(deck_file, config_file, output_file),
+            args=(deck_file, config_file, output_file, hyperspace, showcase),
             daemon=True,
         )
         thread.start()
 
-    def _run_generator(self, deck_file, config_file, output_file):
+    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase):
         """Worker thread that runs the generator and streams log messages in real-time."""
 
         # Custom stream that emits each line to the GUI as it's written
@@ -213,7 +235,7 @@ class DeckListerGUI(QMainWindow):
 
         try:
             config = Config.from_file(config_file)
-            generator = DeckImageGenerator(config=config)
+            generator = DeckImageGenerator(config=config, hyperspace=hyperspace, showcase=showcase)
 
             # Replace sys.stdout directly so all print() calls in this thread go to our stream
             old_stdout = sys.stdout

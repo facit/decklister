@@ -4,12 +4,14 @@ try:
     from .config import Config
     from .card_sizer import CardSizer
     from .renderer import Renderer
+    from .variant_resolver import resolve_variant
     from . import image_downloader as ImageDownloader
 except ImportError:
     from decklister.deck import Deck
     from decklister.config import Config
     from decklister.card_sizer import CardSizer
     from decklister.renderer import Renderer
+    from decklister.variant_resolver import resolve_variant
     from decklister import image_downloader as ImageDownloader
 
 
@@ -23,8 +25,10 @@ class DeckImageGenerator:
     5. Saves output
     """
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, hyperspace=False, showcase=False):
         self.config = config or Config()
+        self.hyperspace = hyperspace
+        self.showcase = showcase
 
     def run(self, deck_file, output_path=None):
         """
@@ -45,7 +49,8 @@ class DeckImageGenerator:
             print(f"Error loading deck: {e}")
             return
 
-        # Download missing images
+        # Resolve variant card numbers and download images
+        self._apply_variants(deck)
         self._download_images(deck)
 
         # Calculate card sizes
@@ -68,12 +73,24 @@ class DeckImageGenerator:
         image.save(output_path)
         print(f"Deck image saved as {output_path}")
 
+    def _apply_variants(self, deck):
+        """Resolve variant card numbers for all cards in the deck."""
+        if not self.hyperspace and not self.showcase:
+            return
+
+        for card in deck.leaders + deck.bases + deck.main_deck + deck.sideboard:
+            card.card_number = resolve_variant(
+                card.card_set, card.card_number,
+                hyperspace=self.hyperspace,
+                showcase=self.showcase,
+            )
+
     def _download_images(self, deck):
-        """Download images for all cards in the deck."""
-        for card in deck.leaders + deck.bases:
-            ImageDownloader.download_images(card.card_set, card.card_number)
-        for card in deck.main_deck + deck.sideboard:
-            ImageDownloader.download_images(card.card_set, card.card_number)
+        """Download images for all cards in the deck concurrently."""
+        cards = []
+        for card in deck.leaders + deck.bases + deck.main_deck + deck.sideboard:
+            cards.append((card.card_set, card.card_number))
+        ImageDownloader.download_images_batch(cards)
 
     def _calculate_layout(self, area, card_count):
         """Calculate card layout for an area. Returns None if area or count is missing."""

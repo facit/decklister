@@ -163,3 +163,50 @@ class TestDeckParsing:
         }
         deck = Deck.from_json(data)
         assert deck.main_deck[0].count == 1
+
+
+# ---- Variant Resolver Tests ----
+
+from .variant_resolver import resolve_variant
+
+class TestVariantResolver:
+    def test_no_variants_returns_original(self):
+        assert resolve_variant("SOR", "10") == "10"
+
+    def test_hyperspace_known_set(self):
+        # SOR has 252 base cards, so hyperspace for card 10 = 10 + 252 = 262
+        assert resolve_variant("SOR", "10", hyperspace=True) == "262"
+
+    def test_hyperspace_different_set(self):
+        # SHD has 262 base cards, so hyperspace for card 5 = 5 + 262 = 267
+        assert resolve_variant("SHD", "5", hyperspace=True) == "267"
+
+    def test_showcase_leader(self):
+        # SOR: showcase for leader 3 = 4*252 - 52 + 3 = 959
+        assert resolve_variant("SOR", "3", showcase=True) == "959"
+
+    def test_showcase_non_leader_no_change(self):
+        # Card 50 is not a leader (1-18), so showcase has no effect
+        assert resolve_variant("SOR", "50", showcase=True) == "50"
+
+    def test_showcase_overrides_hyperspace_for_leaders(self):
+        # Leader card with both flags: showcase wins
+        result = resolve_variant("SOR", "5", hyperspace=True, showcase=True)
+        expected_showcase = str(4 * 252 - 52 + 5)
+        assert result == expected_showcase
+
+    def test_hyperspace_still_applies_to_non_leaders_with_showcase(self):
+        # Non-leader card with both flags: hyperspace applies
+        result = resolve_variant("SOR", "50", hyperspace=True, showcase=True)
+        expected_hyperspace = str(50 + 252)
+        assert result == expected_hyperspace
+
+    def test_unknown_set_returns_original(self):
+        assert resolve_variant("XYZ", "10", hyperspace=True) == "10"
+        assert resolve_variant("XYZ", "5", showcase=True) == "5"
+
+    def test_leader_boundary(self):
+        # Card 18 is the last leader
+        assert resolve_variant("SOR", "18", showcase=True) == str(4 * 252 - 52 + 18)
+        # Card 19 is not a leader
+        assert resolve_variant("SOR", "19", showcase=True) == "19"

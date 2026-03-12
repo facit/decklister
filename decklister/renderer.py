@@ -1,9 +1,13 @@
 import os
-from PIL import Image
+from PIL import Image, ImageDraw
 try:
     from .count_overlay import CountOverlay
 except ImportError:
     from decklister.count_overlay import CountOverlay
+
+# Corner radius measured at the source image resolution (1117x1560)
+SOURCE_CORNER_RADIUS = 46
+SOURCE_IMAGE_HEIGHT = 1560
 
 
 class Renderer:
@@ -99,21 +103,26 @@ class Renderer:
             return
         img_path = self._card_image_path(card)
         try:
-            card_img = Image.open(img_path).convert("RGB")
+            card_img = Image.open(img_path).convert("RGBA")
             orig_w, orig_h = card_img.size
             if orig_w <= 0 or orig_h <= 0:
                 return
+
+            # Apply rounded corners at source resolution (pixel-perfect)
+            card_img = self._apply_rounded_corners(card_img)
 
             # Fit within the area while preserving aspect ratio
             scale = min(area_width / orig_w, area_height / orig_h)
             new_w = int(orig_w * scale)
             new_h = int(orig_h * scale)
-            card_img = card_img.resize((new_w, new_h))
+            card_img = card_img.resize((new_w, new_h), Image.LANCZOS)
 
-            # Center within the area
+            # Center within the area and composite
             paste_x = x0 + (area_width - new_w) // 2
             paste_y = y0 + (area_height - new_h) // 2
-            background.paste(card_img, (paste_x, paste_y))
+            background_rgba = background.convert("RGBA")
+            background_rgba.paste(card_img, (paste_x, paste_y), card_img)
+            background.paste(background_rgba.convert("RGB"))
         except Exception as e:
             print(f"Failed to load {img_path}: {e}")
 
@@ -129,6 +138,7 @@ class Renderer:
         """
         x0, y0, x1, y1 = area
         card_width, card_height, cols, rows, padding = layout
+        background_rgba = background.convert("RGBA")
 
         for i, card in enumerate(cards):
             col = i % cols
@@ -138,16 +148,70 @@ class Renderer:
 
             card_img = self._load_card_image(card, card_width, card_height)
             card_img = self.count_overlay.apply(card_img, card.count)
-            background.paste(card_img, (x, y))
+
+            # Convert to RGBA if not already (count_overlay may return RGB)
+            if card_img.mode != "RGBA":
+                card_img = card_img.convert("RGBA")
+            background_rgba.paste(card_img, (x, y), card_img)
+
+        background.paste(background_rgba.convert("RGB"))
 
     def _load_card_image(self, card, width, height):
-        """Load and resize a card image, or return a placeholder."""
+        """Load a card image, apply rounded corners at source resolution, then resize."""
         img_path = self._card_image_path(card)
         try:
-            return Image.open(img_path).convert("RGB").resize((width, height))
+            img = Image.open(img_path).convert("RGBA")
+            img = self._apply_rounded_corners(img)
+            return img.resize((width, height), Image.LANCZOS)
         except Exception as e:
             print(f"Failed to load {img_path}: {e}")
-            return Image.new("RGB", (width, height), (80, 80, 80))
+            return Image.new("RGBA", (width, height), (80, 80, 80, 255))
+
+    def _apply_rounded_corners(self, img):
+        """
+        Apply a rounded corner alpha mask to an image.
+        If the image already has meaningful transparency in the corners,
+        skip masking and use the existing alpha.
+        The radius is calculated from the known source dimensions.
+        Uses supersampling for smooth anti-aliased edges.
+        """
+        w, h = img.size
+
+        # Check if corners already have transparency
+        if img.mode == "RGBA":
+            corner_pixels = [
+                img.getpixel((0, 0)),
+                img.getpixel((w - 1, 0)),
+                img.getpixel((0, h - 1)),
+                img.getpixel((w - 1, h - 1)),
+            ]
+            if all(p[3] < 128 for p in corner_pixels):
+                return img
+
+        long_side = max(w, h)
+        radius = max(1, int(SOURCE_CORNER_RADIUS * long_side / SOURCE_IMAGE_HEIGHT))
+
+        # Draw circle at 4x resolution for smooth anti-aliasing
+        scale = 4
+        big_r = radius * scale
+        circle_big = Image.new("L", (big_r * 2, big_r * 2), 0)
+        draw = ImageDraw.Draw(circle_big)
+        draw.ellipse((0, 0, big_r * 2 - 1, big_r * 2 - 1), fill=255)
+        # Downscale to actual radius size
+        circle = circle_big.resize((radius * 2, radius * 2), Image.LANCZOS)
+
+        alpha = Image.new("L", (w, h), 255)
+        # Top-left
+        alpha.paste(circle.crop((0, 0, radius, radius)), (0, 0))
+        # Top-right
+        alpha.paste(circle.crop((radius, 0, radius * 2, radius)), (w - radius, 0))
+        # Bottom-left
+        alpha.paste(circle.crop((0, radius, radius, radius * 2)), (0, h - radius))
+        # Bottom-right
+        alpha.paste(circle.crop((radius, radius, radius * 2, radius * 2)), (w - radius, h - radius))
+
+        img.putalpha(alpha)
+        return img
 
     def _card_image_path(self, card):
         """Build the file path for a card image."""

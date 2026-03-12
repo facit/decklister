@@ -15,10 +15,12 @@ def main_cli():
     parser.add_argument("deck_file", help="Path to the deck file")
     parser.add_argument("config_file", help="Path to the config file")
     parser.add_argument("-o", "--output", help="Output file path (auto-named if not provided)", default=None)
+    parser.add_argument("--hyperspace", action="store_true", help="Use hyperspace variant art for all cards")
+    parser.add_argument("--showcase", action="store_true", help="Use showcase variant art for leaders (overrides hyperspace for leaders)")
     args = parser.parse_args()
 
     config = Config.from_file(args.config_file)
-    generator = DeckImageGenerator(config=config)
+    generator = DeckImageGenerator(config=config, hyperspace=args.hyperspace, showcase=args.showcase)
     generator.run(args.deck_file, output_path=args.output)
 
 
