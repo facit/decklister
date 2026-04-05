@@ -66,6 +66,7 @@ The GUI lets you pick your deck file, config file, and optional output path, the
 
 ```bash
 py -m decklister my_deck.json my_config.json
+py -m decklister my_deck.csv my_config.json
 ```
 
 Optionally specify an output path:
@@ -76,11 +77,22 @@ py -m decklister my_deck.json my_config.json -o output.png
 
 If no output path is given, files are auto-named `deck_output_1.png`, `deck_output_2.png`, etc.
 
+#### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `-o`, `--output` | Output file path. Auto-named if omitted. |
+| `--hyperspace` | Use hyperspace variant art for all cards. |
+| `--showcase` | Use showcase variant art for leaders (overrides `--hyperspace` for leaders). |
+| `--player NAME` | (CSV only) Select a deck by player name from a multi-deck CSV export. |
+| `--index N` | (CSV only) Select a deck by 0-based index from a multi-deck CSV export (default: 0). |
+
 ## Project Structure
 
 ```
 project/
 ├── README.md
+├── swudb_api.md
 ├── requirements.txt
 ├── dev-requirements.txt
 ├── pyproject.toml
@@ -92,6 +104,7 @@ project/
 ├── example_background.png
 ├── example_foreground.png
 ├── example_count_background.png
+├── example_config.json
 ├── decklister/
 │   ├── __init__.py
 │   ├── __main__.py
@@ -102,6 +115,9 @@ project/
 │   ├── renderer.py
 │   ├── deck_image_generator.py
 │   ├── image_downloader.py
+│   ├── melee_csv_parser.py
+│   ├── variant_resolver.py
+│   ├── card_cache.json
 │   ├── gui.py
 │   ├── config_drawer.py
 │   └── tests.py
@@ -109,10 +125,12 @@ project/
 
 ## Deck Format
 
-Two formats are supported. You can use either the **list format** or the **swudb format** for leaders and bases, but not both in the same file.
+Three input formats are supported.
 
-### List format
-This format allows you to show any number of leadera or bases (not just 1 or 2) 
+### JSON — list format
+
+Allows any number of leaders or bases.
+
 ```json
 {
   "metadata": {
@@ -136,8 +154,10 @@ This format allows you to show any number of leadera or bases (not just 1 or 2)
 }
 ```
 
-### Swudb format
-The format for json deck files on swudb.com
+### JSON — swudb format
+
+The format used by deck exports from swudb.com.
+
 ```json
 {
   "leader": { "id": "SHD_009", "count": 1 },
@@ -152,13 +172,27 @@ The format for json deck files on swudb.com
 
 Card IDs follow the format `SET_NUMBER` (e.g., `SHD_009`). The `count` field defaults to 1 if omitted.
 
+### Melee.gg CSV format
+
+Tournament CSV exports from [melee.gg](https://melee.gg). The file can contain decks from multiple players; use `--player` or `--index` to select which one.
+
+```bash
+py -m decklister tournament.csv my_config.json --player "PlayerName"
+py -m decklister tournament.csv my_config.json --index 2
+```
+
+Card set and number are resolved automatically by looking up each card name (and subtitle where applicable) via the swudb.com API. Resolved lookups are cached locally in `decklister/card_cache.json` so subsequent runs don't repeat API calls.
+
 ## Config Format
 
 ```json
 {
   "resolution": [1920, 1080],
-  "background": "background.png",
-  "foreground": "foreground.png",
+  "layers": [
+    "background.png",
+    {"type": "cards"},
+    "foreground.png"
+  ],
   "leader_areas": [[90, 90, 390, 490]],
   "base_areas": [[90, 530, 390, 930]],
   "deck_area": [390, 90, 1870, 660],
@@ -174,8 +208,7 @@ Card IDs follow the format `SET_NUMBER` (e.g., `SHD_009`). The `count` field def
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `resolution` | `[w, h]` | `[1920, 1080]` | Output image resolution in pixels. |
-| `background` | `string` or `[r, g, b]` | Dark gray | Path to a background image, or an RGB color. |
-| `foreground` | `string` | None | Path to a foreground image (RGBA). Alpha-composited on top of everything at the end. |
+| `layers` | array | `[{"type":"cards"}]` | Ordered list of layers drawn bottom to top. See [Layers](#layers) below. |
 | `leader_areas` | `[[x0,y0,x1,y1], ...]` | `[]` | Rectangles where leader cards are placed. Supports any number of leaders. |
 | `base_areas` | `[[x0,y0,x1,y1], ...]` | `[]` | Rectangles where base cards are placed. Supports any number of bases. |
 | `deck_area` | `[x0,y0,x1,y1]` | None | Rectangle where main deck cards are laid out in a grid. |
@@ -187,6 +220,61 @@ Card IDs follow the format `SET_NUMBER` (e.g., `SHD_009`). The `count` field def
 All areas use the coordinate format `[x0, y0, x1, y1]` where `(x0, y0)` is the top-left corner and `(x1, y1)` is the bottom-right corner.
 
 Leader and base cards are scaled to fit within their area while preserving their original aspect ratio, and centered within the area.
+
+### Layers
+
+The `layers` array controls what is drawn and in what order. Each entry is drawn on top of the previous. There are three layer types:
+
+#### Image layer
+
+Draws an image file onto the canvas. If no `area` is given, the image is stretched to fill the entire canvas. If `area` is given, the image is stretched to fit that rectangle.
+
+```json
+"background.png"
+```
+```json
+{"type": "image", "path": "logo.png", "area": [100, 100, 400, 300]}
+```
+
+A bare string is shorthand for a full-canvas image layer.
+
+#### Color layer
+
+Fills the canvas (or a rectangle) with a solid color. Useful for setting a background color or adding a colored overlay with transparency.
+
+```json
+[30, 30, 30]
+```
+```json
+{"type": "color", "color": [0, 0, 0, 128]}
+```
+
+A bare `[r, g, b]` array is shorthand for a full-canvas color layer. A fourth value sets alpha (0–255).
+
+#### Cards layer
+
+Renders all card elements at this position in the stack: leaders, bases, the main deck grid, and the sideboard grid.
+
+```json
+{"type": "cards"}
+```
+
+There must be exactly one cards layer. Layers before it appear behind the cards; layers after it appear in front.
+
+#### Example: background → cards → overlay
+
+```json
+"layers": [
+  "stream_background.png",
+  {"type": "cards"},
+  {"type": "image", "path": "guest_overlay.png", "area": [1500, 0, 1920, 200]},
+  "frame_foreground.png"
+]
+```
+
+### Backwards compatibility
+
+Old configs using `background` and `foreground` fields are still supported and are automatically converted to the layers format at load time.
 
 ## Config Drawer
 
@@ -204,10 +292,12 @@ Requires `tkinter` (included with most Python installations). Load a background 
 |--------|---------|
 | `deck_image_generator.py` | Orchestrator — loads config/deck, downloads images, calculates sizes, renders, saves. |
 | `card_sizer.py` | Pure math — calculates optimal card size and grid layout for a given area and card count. |
-| `renderer.py` | Composes the final image: background → leaders → bases → deck grid → sideboard grid → foreground. |
+| `renderer.py` | Composes the final image by processing the `layers` list in order. |
 | `count_overlay.py` | Draws the card count on each card. Pluggable strategy — subclass and override `apply()` to customize. |
-| `config.py` | Loads and holds the JSON config. |
-| `deck.py` | Parses deck JSON into Card/Deck objects. Supports both list and legacy formats. |
+| `config.py` | Loads and holds the JSON config. Converts old `background`/`foreground` fields to `layers` format automatically. |
+| `deck.py` | Parses deck JSON into Card/Deck objects. Supports both list and swudb formats. |
+| `melee_csv_parser.py` | Parses Melee.gg tournament CSV exports. Resolves card names to set/number via the swudb.com API, with a local cache. |
+| `variant_resolver.py` | Resolves card numbers to their hyperspace or showcase variant equivalents. |
 | `image_downloader.py` | Downloads card images from swudb.com. Handles portrait/landscape/back variants. |
 | `gui.py` | PySide6 GUI — file pickers, generate button, config drawer launcher, and log output. |
 | `config_drawer.py` | Standalone Tkinter tool for visually creating config files. |
