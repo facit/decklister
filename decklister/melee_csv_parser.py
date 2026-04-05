@@ -151,7 +151,18 @@ def parse_melee_csv(path, player_name=None, deck_index=0):
     deck_name = row.get("Name", "")
     print(f"Parsing deck: {deck_name}")
 
-    records = json.loads(row.get("Records", "[]"))
+    records_raw = row.get("Records", "[]")
+    try:
+        stripped = records_raw.strip()
+        if stripped.startswith("["):
+            records = json.loads(stripped)
+        else:
+            records = [json.loads(part.strip()) for part in stripped.split("|") if part.strip()]
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Could not parse Records field for deck '{deck_name}': {e}\n"
+            f"Raw value (first 200 chars): {records_raw[:200]!r}"
+        ) from e
 
     # Collect unique (name, subtitle) pairs to minimise API calls
     unique_cards = {}
