@@ -30,21 +30,31 @@ class DeckImageGenerator:
         self.hyperspace = hyperspace
         self.showcase = showcase
 
-    def run(self, deck_file, output_path=None):
+    def run(self, deck_file, output_path=None, player=None, deck_index=0):
         """
         Generate a deck image from a deck file.
 
         Args:
-            deck_file: Path to the deck JSON file.
+            deck_file: Path to the deck file (.json or Melee.gg .csv).
             output_path: Optional output file path. Auto-named if not provided.
+            player: (CSV only) Player name to select from a multi-deck CSV.
+            deck_index: (CSV only) 0-based row index when player is not given.
         """
         if not deck_file:
             print("No deck file provided.")
             return
 
-        # Load deck
+        # Load deck — dispatch by file extension
         try:
-            deck = Deck.from_json_file(deck_file)
+            ext = os.path.splitext(deck_file)[1].lower()
+            if ext == ".csv":
+                try:
+                    from .melee_csv_parser import parse_melee_csv
+                except ImportError:
+                    from decklister.melee_csv_parser import parse_melee_csv
+                deck = parse_melee_csv(deck_file, player_name=player, deck_index=deck_index)
+            else:
+                deck = Deck.from_json_file(deck_file)
         except Exception as e:
             print(f"Error loading deck: {e}")
             return
