@@ -221,4 +221,5 @@ def parse_melee_csv(path, player_name=None, deck_index=0):
         elif category == 99:
             sideboard.append(card)
 
-    return Deck(leaders, bases, main_deck, sideboard, metadata={"name": deck_name})
+    row_meta = {k: v for k, v in row.items() if k != "Records"}
+    return Deck(leaders, bases, main_deck, sideboard, metadata={"name": deck_name, **row_meta})

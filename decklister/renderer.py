@@ -1,5 +1,5 @@
 import os
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFont
 try:
     from .count_overlay import CountOverlay
 except ImportError:
@@ -58,6 +58,16 @@ class Renderer:
                     self._draw_card_grid(canvas, deck.main_deck, self.config.deck_area, deck_layout)
                 if sb_layout and self.config.sb_area:
                     self._draw_card_grid(canvas, deck.sideboard, self.config.sb_area, sb_layout)
+            elif layer_type == "text":
+                self._draw_text_layer(canvas, layer_data, text=layer_data.get("text", ""))
+            elif layer_type == "csv_field":
+                column = layer_data.get("column", "")
+                meta = deck.metadata or {}
+                if column == "DeckName":
+                    text = meta.get("AdminGivenName") or meta.get("Name", "")
+                else:
+                    text = meta.get(column, f"[{column}]")
+                self._draw_text_layer(canvas, layer_data, text=text)
 
         return canvas.convert("RGB")
 
@@ -93,8 +103,43 @@ class Renderer:
                 return ("color", tuple(c))
             if t == "cards":
                 return ("cards", None)
+            if t == "text":
+                return ("text", layer)
+            if t == "csv_field":
+                return ("csv_field", layer)
 
         return (None, None)
+
+    def _draw_text_layer(self, canvas, data, text):
+        """Draw text onto the canvas at a position or within an area."""
+        color = data.get("color", [255, 255, 255])
+        color = tuple(color) if len(color) == 4 else (*color, 255)
+        size = data.get("size", 48)
+        align = data.get("align", "left")
+
+        font_path = data.get("font")
+        try:
+            font = ImageFont.truetype(font_path, size) if font_path else ImageFont.load_default(size=size)
+        except Exception:
+            font = ImageFont.load_default()
+
+        draw = ImageDraw.Draw(canvas)
+        area = data.get("area")
+        position = data.get("position")
+
+        if area:
+            x0, y0, x1, y1 = area
+            if align == "center":
+                x, anchor = (x0 + x1) // 2, "mt"
+            elif align == "right":
+                x, anchor = x1, "rt"
+            else:
+                x, anchor = x0, "lt"
+            draw.text((x, y0), text, font=font, fill=color, anchor=anchor)
+        elif position:
+            draw.text(tuple(position), text, font=font, fill=color, anchor="lt")
+        else:
+            draw.text((0, 0), text, font=font, fill=color)
 
     def _apply_image_layer(self, canvas, path, area=None):
         """

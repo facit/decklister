@@ -3,6 +3,16 @@
   "layers": [
     "example_background.png",
     {"type": "cards"},
+	{"type": "csv_field", "column": "DeckName", "position": [90, 20], "size": 30, "color": [255, 255, 255], "font": "C:/Windows/Fonts/arial.ttf"},
+    {
+      "type": "text",
+      "text": "By: ",
+      "position": [90, 50],
+      "size": 20,
+      "color": [255, 255, 255],
+      "font": "C:/Windows/Fonts/arial.ttf"
+    },
+	{"type": "csv_field", "column": "OwnerDisplayName", "position": [120, 50], "size": 20, "color": [255, 255, 255], "font": "C:/Windows/Fonts/arial.ttf"},
     "example_foreground.png"
   ],
   "leader_areas": [[90, 90, 390, 290]],

@@ -223,7 +223,7 @@ Leader and base cards are scaled to fit within their area while preserving their
 
 ### Layers
 
-The `layers` array controls what is drawn and in what order. Each entry is drawn on top of the previous. There are three layer types:
+The `layers` array controls what is drawn and in what order. Each entry is drawn on top of the previous. There are five layer types:
 
 #### Image layer
 
@@ -261,14 +261,49 @@ Renders all card elements at this position in the stack: leaders, bases, the mai
 
 There must be exactly one cards layer. Layers before it appear behind the cards; layers after it appear in front.
 
-#### Example: background → cards → overlay
+#### Text layer
+
+Draws a static string onto the canvas.
+
+```json
+{"type": "text", "text": "My Deck", "position": [100, 50], "size": 48, "color": [255, 255, 255]}
+```
+
+Use `area` instead of `position` to place text within a bounding box with optional alignment:
+
+```json
+{"type": "text", "text": "My Deck", "area": [100, 50, 800, 120], "align": "center", "size": 36}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `text` | string | `""` | The string to draw |
+| `position` | `[x, y]` | — | Top-left anchor point |
+| `area` | `[x0,y0,x1,y1]` | — | Bounding box; `align` applies horizontally |
+| `size` | int | `48` | Font size in pixels |
+| `font` | string | system default | Path to a .ttf font file |
+| `color` | `[r,g,b]` or `[r,g,b,a]` | `[255,255,255]` | Text color |
+| `align` | `"left"/"center"/"right"` | `"left"` | Horizontal alignment (area only) |
+
+#### CSV field layer
+
+Like a text layer, but the string is taken from a named column in the Melee.gg CSV row. Useful for automatically stamping the player name, deck name, or any other column onto the image.
+
+```json
+{"type": "csv_field", "column": "OwnerDisplayName", "position": [100, 50], "size": 48, "color": [255, 255, 255]}
+```
+
+The `column` value must match a column header in the CSV (e.g. `"OwnerDisplayName"`, `"Name"`). All other fields are the same as the text layer. If the column is not found, the placeholder `[ColumnName]` is drawn instead.
+
+#### Example: background → cards → overlay → text
 
 ```json
 "layers": [
   "stream_background.png",
   {"type": "cards"},
   {"type": "image", "path": "guest_overlay.png", "area": [1500, 0, 1920, 200]},
-  "frame_foreground.png"
+  "frame_foreground.png",
+  {"type": "text", "text": "Deck Name", "position": [100, 30], "size": 40, "color": [255, 255, 255]}
 ]
 ```
 
