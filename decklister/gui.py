@@ -55,7 +55,8 @@ class DeckListerGUI(QMainWindow):
         deck_row = QHBoxLayout()
         deck_row.addWidget(QLabel("Deck File:"))
         self.deck_input = QLineEdit()
-        self.deck_input.setPlaceholderText("Select a deck JSON file...")
+        self.deck_input.setPlaceholderText("Select a deck JSON or Melee CSV file...")
+        self.deck_input.textChanged.connect(self._update_csv_visibility)
         deck_row.addWidget(self.deck_input)
         deck_browse = QPushButton("Browse...")
         deck_browse.clicked.connect(self._browse_deck)
@@ -85,6 +86,30 @@ class DeckListerGUI(QMainWindow):
         input_layout.addLayout(output_row)
 
         layout.addWidget(input_group)
+
+        # --- CSV Options (shown only when a .csv file is selected) ---
+        self.csv_group = QGroupBox("CSV Options")
+        csv_layout = QVBoxLayout(self.csv_group)
+
+        player_row = QHBoxLayout()
+        player_row.addWidget(QLabel("Player:"))
+        self.player_input = QLineEdit()
+        self.player_input.setPlaceholderText("(Optional) Player name to select from a multi-deck CSV")
+        player_row.addWidget(self.player_input)
+        csv_layout.addLayout(player_row)
+
+        index_row = QHBoxLayout()
+        index_row.addWidget(QLabel("Deck Index:"))
+        self.index_input = QLineEdit()
+        self.index_input.setPlaceholderText("0")
+        self.index_input.setText("0")
+        self.index_input.setToolTip("0-based row index (used when Player is empty)")
+        index_row.addWidget(self.index_input)
+        index_row.addStretch()
+        csv_layout.addLayout(index_row)
+
+        self.csv_group.setVisible(False)  # Hidden until a .csv is selected
+        layout.addWidget(self.csv_group)
 
         # --- Variant Options ---
         options_group = QGroupBox("Card Variants")
@@ -149,7 +174,8 @@ class DeckListerGUI(QMainWindow):
 
     def _browse_deck(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Deck File", "", "JSON Files (*.json);;All Files (*)"
+            self, "Select Deck File", "",
+            "Deck Files (*.json *.csv);;JSON Files (*.json);;CSV Files (*.csv);;All Files (*)"
         )
         if path:
             self.deck_input.setText(path)
@@ -202,15 +228,31 @@ class DeckListerGUI(QMainWindow):
         if showcase:
             self._append_log("  Variant: Showcase leaders")
 
+        # CSV-specific options
+        player = None
+        deck_index = 0
+        if deck_file.lower().endswith(".csv"):
+            player = self.player_input.text().strip() or None
+            try:
+                deck_index = int(self.index_input.text().strip() or "0")
+            except ValueError:
+                self._append_log("Error: Deck Index must be a number.")
+                self._set_running(False)
+                return
+            if player:
+                self._append_log(f"  Player: {player}")
+            else:
+                self._append_log(f"  Deck Index: {deck_index}")
+
         # Run in a thread to keep the GUI responsive
         thread = threading.Thread(
             target=self._run_generator,
-            args=(deck_file, config_file, output_file, hyperspace, showcase),
+            args=(deck_file, config_file, output_file, hyperspace, showcase, player, deck_index),
             daemon=True,
         )
         thread.start()
 
-    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase):
+    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase, player, deck_index):
         """Worker thread that runs the generator and streams log messages in real-time."""
 
         # Custom stream that emits each line to the GUI as it's written
@@ -243,7 +285,7 @@ class DeckListerGUI(QMainWindow):
             sys.stdout = stream
             sys.stderr = stream
             try:
-                generator.run(deck_file, output_path=output_file)
+                generator.run(deck_file, output_path=output_file, player=player, deck_index=deck_index)
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
@@ -334,6 +376,11 @@ class DeckListerGUI(QMainWindow):
             self._append_log("✗ No example files found to export.")
 
     # --- UI Helpers ---
+
+    def _update_csv_visibility(self, text):
+        """Show CSV options only when a .csv file is in the deck input."""
+        is_csv = text.strip().lower().endswith(".csv")
+        self.csv_group.setVisible(is_csv)
 
     def _append_log(self, text):
         self.log_output.append(text)
