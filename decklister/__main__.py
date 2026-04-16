@@ -35,8 +35,20 @@ def main_gui():
 
 
 if __name__ == "__main__":
-    # If arguments are provided, run CLI. Otherwise, launch GUI.
-    if len(sys.argv) > 1:
+    import os
+
+    # Detect whether this is the CLI exe (e.g., DeckLister-cli.exe)
+    exe_name = os.path.basename(sys.argv[0]).lower()
+    is_cli_exe = "-cli" in exe_name or "_cli" in exe_name
+
+    if is_cli_exe:
+        # CLI exe: always run CLI mode. If no args, show help instead of launching GUI.
+        if len(sys.argv) == 1:
+            sys.argv.append("--help")
         main_cli()
     else:
-        main_gui()
+        # Normal/GUI exe: args → CLI, no args → GUI
+        if len(sys.argv) > 1:
+            main_cli()
+        else:
+            main_gui()

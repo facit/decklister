@@ -11,11 +11,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: DeckLister-Windows.exe
-            exe_path: dist/DeckLister.exe
+            artifact_name: DeckLister-Windows.zip
           - os: macos-latest
             artifact_name: DeckLister-macOS.zip
-            exe_path: dist/DeckLister.app
 
     runs-on: ${{ matrix.os }}
 
@@ -36,13 +34,13 @@ jobs:
       - name: Build executable
         run: python build.py
 
-      - name: Zip macOS app
+      - name: Zip Windows build
+        if: runner.os == 'Windows'
+        run: Compress-Archive -Path dist/DeckLister -DestinationPath dist/DeckLister-Windows.zip
+
+      - name: Zip macOS build
         if: runner.os == 'macOS'
         run: cd dist && zip -r DeckLister-macOS.zip DeckLister.app
-
-      - name: Prepare Windows artifact
-        if: runner.os == 'Windows'
-        run: copy dist\DeckLister.exe dist\DeckLister-Windows.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -67,5 +65,5 @@ jobs:
         with:
           generate_release_notes: true
           files: |
-            artifacts/DeckLister-Windows.exe/DeckLister-Windows.exe
+            artifacts/DeckLister-Windows.zip/DeckLister-Windows.zip
             artifacts/DeckLister-macOS.zip/DeckLister-macOS.zip

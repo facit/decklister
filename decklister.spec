@@ -8,15 +8,18 @@
 # Prerequisites:
 #   pip install pyinstaller
 #   pip install -r requirements.txt
-
+#
+# Produces two executables:
+#   - DeckLister.exe     (GUI, no console window)
+#   - DeckLister-cli.exe (CLI, with console for stdout/stderr)
 import sys
 import os
 
 block_cipher = None
-
 # Use SPECPATH (set by PyInstaller to the directory containing this spec file)
 SPEC_DIR = SPECPATH
 
+# Shared Analysis (same code for both exes)
 a = Analysis(
     [os.path.join(SPEC_DIR, 'decklister', '__main__.py')],
     pathex=[SPEC_DIR],
@@ -40,6 +43,8 @@ a = Analysis(
         'decklister.count_overlay',
         'decklister.renderer',
         'decklister.image_downloader',
+        'decklister.variant_resolver',
+        'decklister.melee_csv_parser',
         'decklister.config_drawer',
     ],
     hookspath=[],
@@ -54,13 +59,12 @@ a = Analysis(
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
-exe = EXE(
+# --- GUI executable (no console window) ---
+exe_gui = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
     [],
+	exclude_binaries=True,
     name='DeckLister',
     debug=False,
     bootloader_ignore_signals=False,
@@ -77,10 +81,44 @@ exe = EXE(
     icon=os.path.join(SPEC_DIR, 'icon.ico') if sys.platform == 'win32' else os.path.join(SPEC_DIR, 'icon_256.png'),
 )
 
-# macOS app bundle
+# --- CLI executable (with console for stdout/stderr) ---
+exe_cli = EXE(
+    pyz,
+    a.scripts,
+    [],
+	exclude_binaries=True,
+    name='DeckLister-cli',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True,  # Show console for CLI output
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=os.path.join(SPEC_DIR, 'icon.ico') if sys.platform == 'win32' else os.path.join(SPEC_DIR, 'icon_256.png'),
+)
+
+coll = COLLECT(
+    exe_gui,
+    exe_cli,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='DeckLister',
+)
+
+# macOS app bundle (GUI only — CLI users run the raw DeckLister-cli binary)
 if sys.platform == 'darwin':
     app = BUNDLE(
-        exe,
+        exe_gui,
         name='DeckLister.app',
         icon=os.path.join(SPEC_DIR, 'icon_256.png'),
         bundle_identifier='com.decklister.app',
