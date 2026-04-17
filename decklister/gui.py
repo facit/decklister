@@ -1,3 +1,4 @@
+import shutil
 import sys
 import os
 import subprocess
@@ -16,6 +17,11 @@ try:
 except ImportError:
     from decklister.deck_image_generator import DeckImageGenerator
     from decklister.config import Config
+
+try:
+    from .app_paths import get_app_data_dir
+except ImportError:
+    from decklister.app_paths import get_app_data_dir
 
 
 class LogSignal(QObject):
@@ -108,6 +114,11 @@ class DeckListerGUI(QMainWindow):
         index_row.addStretch()
         csv_layout.addLayout(index_row)
 
+        self.all_decks_check = QCheckBox("Generate all decks")
+        self.all_decks_check.setToolTip("Generate images for every deck in the CSV (ignores Player and Deck Index)")
+        self.all_decks_check.toggled.connect(self._toggle_all_decks)
+        csv_layout.addWidget(self.all_decks_check)
+
         self.csv_group.setVisible(False)  # Hidden until a .csv is selected
         layout.addWidget(self.csv_group)
 
@@ -147,6 +158,11 @@ class DeckListerGUI(QMainWindow):
         self.export_examples_btn.setMinimumHeight(40)
         self.export_examples_btn.clicked.connect(self._export_examples)
         actions_layout.addWidget(self.export_examples_btn)
+
+        self.clear_cache_btn = QPushButton("Clear Cache")
+        self.clear_cache_btn.setMinimumHeight(40)
+        self.clear_cache_btn.clicked.connect(self._clear_cache)
+        actions_layout.addWidget(self.clear_cache_btn)
 
         layout.addLayout(actions_layout)
 
@@ -231,28 +247,33 @@ class DeckListerGUI(QMainWindow):
         # CSV-specific options
         player = None
         deck_index = 0
+        generate_all = False
         if deck_file.lower().endswith(".csv"):
-            player = self.player_input.text().strip() or None
-            try:
-                deck_index = int(self.index_input.text().strip() or "0")
-            except ValueError:
-                self._append_log("Error: Deck Index must be a number.")
-                self._set_running(False)
-                return
-            if player:
-                self._append_log(f"  Player: {player}")
+            generate_all = self.all_decks_check.isChecked()
+            if generate_all:
+                self._append_log("  Mode: All decks in CSV")
             else:
-                self._append_log(f"  Deck Index: {deck_index}")
+                player = self.player_input.text().strip() or None
+                try:
+                    deck_index = int(self.index_input.text().strip() or "0")
+                except ValueError:
+                    self._append_log("Error: Deck Index must be a number.")
+                    self._set_running(False)
+                    return
+                if player:
+                    self._append_log(f"  Player: {player}")
+                else:
+                    self._append_log(f"  Deck Index: {deck_index}")
 
         # Run in a thread to keep the GUI responsive
         thread = threading.Thread(
             target=self._run_generator,
-            args=(deck_file, config_file, output_file, hyperspace, showcase, player, deck_index),
+            args=(deck_file, config_file, output_file, hyperspace, showcase, player, deck_index, generate_all),
             daemon=True,
         )
         thread.start()
 
-    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase, player, deck_index):
+    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase, player, deck_index, generate_all):
         """Worker thread that runs the generator and streams log messages in real-time."""
 
         # Custom stream that emits each line to the GUI as it's written
@@ -285,7 +306,10 @@ class DeckListerGUI(QMainWindow):
             sys.stdout = stream
             sys.stderr = stream
             try:
-                generator.run(deck_file, output_path=output_file, player=player, deck_index=deck_index)
+                if generate_all:
+                    generator.run_all(deck_file, output_path=output_file)
+                else:
+                    generator.run(deck_file, output_path=output_file, player=player, deck_index=deck_index)
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
@@ -375,12 +399,41 @@ class DeckListerGUI(QMainWindow):
         else:
             self._append_log("✗ No example files found to export.")
 
+    # --- Clear Cache ---
+    def _clear_cache(self):
+        """Clear the card image cache."""
+        self._append_log("Clearing cache...")
+        try:
+            cache_dir = get_app_data_dir()
+            self._append_log(f"Cache directory: {cache_dir}")
+            if os.path.isdir(cache_dir):
+                # Remove all files in the cache directory
+                for filename in os.listdir(cache_dir):
+                    file_path = os.path.join(cache_dir, filename)
+                    try:
+                        if os.path.isfile(file_path) or os.path.islink(file_path):
+                            os.unlink(file_path)
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path)
+                    except Exception as e:
+                        self._append_log(f"Failed to delete {file_path}: {e}")
+                self._append_log("✓ Cache cleared.")
+            else:
+                self._append_log("Cache directory not found, nothing to clear.")
+        except Exception as e:
+            self._append_log(f"Error clearing cache: {e}")
+
     # --- UI Helpers ---
 
     def _update_csv_visibility(self, text):
         """Show CSV options only when a .csv file is in the deck input."""
         is_csv = text.strip().lower().endswith(".csv")
         self.csv_group.setVisible(is_csv)
+
+    def _toggle_all_decks(self, checked):
+        """Disable player/index fields when 'Generate all' is checked."""
+        self.player_input.setEnabled(not checked)
+        self.index_input.setEnabled(not checked)
 
     def _append_log(self, text):
         self.log_output.append(text)

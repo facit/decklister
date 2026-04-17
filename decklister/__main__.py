@@ -19,11 +19,15 @@ def main_cli():
     parser.add_argument("--showcase", action="store_true", help="Use showcase variant art for leaders (overrides hyperspace for leaders)")
     parser.add_argument("--player", default=None, help="(CSV only) Player name to select from a multi-deck CSV export")
     parser.add_argument("--index", type=int, default=0, help="(CSV only) 0-based deck index to select from a multi-deck CSV export (default: 0)")
+    parser.add_argument("--all", action="store_true", help="(CSV only) Generate images for all decks in the CSV")
     args = parser.parse_args()
 
     config = Config.from_file(args.config_file)
     generator = DeckImageGenerator(config=config, hyperspace=args.hyperspace, showcase=args.showcase)
-    generator.run(args.deck_file, output_path=args.output, player=args.player, deck_index=args.index)
+    if args.all:
+        generator.run_all(args.deck_file, output_path=args.output)
+    else:
+        generator.run(args.deck_file, output_path=args.output, player=args.player, deck_index=args.index)
 
 
 def main_gui():

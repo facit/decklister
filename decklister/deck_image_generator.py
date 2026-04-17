@@ -45,13 +45,15 @@ class DeckImageGenerator:
             return
 
         # Load deck — dispatch by file extension
+        is_multi_deck = False
         try:
             ext = os.path.splitext(deck_file)[1].lower()
             if ext == ".csv":
                 try:
-                    from .melee_csv_parser import parse_melee_csv
+                    from .melee_csv_parser import parse_melee_csv, _count_rows
                 except ImportError:
-                    from decklister.melee_csv_parser import parse_melee_csv
+                    from decklister.melee_csv_parser import parse_melee_csv, _count_rows
+                is_multi_deck = _count_rows(deck_file) > 1
                 deck = parse_melee_csv(deck_file, player_name=player, deck_index=deck_index)
             else:
                 deck = Deck.from_json_file(deck_file)
@@ -59,6 +61,62 @@ class DeckImageGenerator:
             print(f"Error loading deck: {e}")
             return
 
+        self._generate_image(deck, deck_file, output_path, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
+
+    def run_all(self, deck_file, output_path=None):
+        """
+        Generate deck images for ALL decks in a Melee CSV export.
+
+        Args:
+            deck_file: Path to a Melee.gg CSV file.
+            output_path: Not used (each deck gets an auto-named output).
+        """
+        if not deck_file:
+            print("No deck file provided.")
+            return
+
+        ext = os.path.splitext(deck_file)[1].lower()
+        if ext != ".csv":
+            print("--all only works with CSV files. Running single deck instead.")
+            self.run(deck_file, output_path=output_path)
+            return
+
+        try:
+            from .melee_csv_parser import parse_melee_csv, _count_rows
+        except ImportError:
+            from decklister.melee_csv_parser import parse_melee_csv, _count_rows
+
+        total = _count_rows(deck_file)
+        if total == 0:
+            print("CSV file contains no decks.")
+            return
+
+        print(f"Generating images for {total} deck(s)...")
+        is_multi_deck = total > 1
+
+        for i in range(total):
+            try:
+                deck = parse_melee_csv(deck_file, deck_index=i)
+                display = deck.metadata.get("OwnerDisplayName") or deck.metadata.get("OwnerUsername", f"index {i}")
+                print(f"\n--- Deck {i + 1}/{total}: {display} ---")
+                self._generate_image(deck, deck_file, output_path=None, deck_index=i, is_multi_deck=is_multi_deck)
+            except Exception as e:
+                print(f"Error processing deck {i}: {e}")
+
+        print(f"\nDone — {total} deck(s) processed.")
+
+    def _generate_image(self, deck, deck_file, output_path=None, player=None, deck_index=0, is_multi_deck=False):
+        """
+        Generate and save a single deck image.
+
+        Args:
+            deck: Deck object.
+            deck_file: Original input file path (for auto-naming).
+            output_path: Optional explicit output path.
+            player: Player name (for auto-naming).
+            deck_index: Deck index (for auto-naming).
+            is_multi_deck: Whether the source has multiple decks.
+        """
         # Resolve variant card numbers and download images
         self._apply_variants(deck)
         self._download_images(deck)
@@ -79,7 +137,7 @@ class DeckImageGenerator:
         image = renderer.render(deck, deck_layout, sb_layout)
 
         # Save
-        output_path = output_path or self._auto_output_name()
+        output_path = output_path or self._auto_output_name(deck_file, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
         image.save(output_path)
         print(f"Deck image saved as {output_path}")
 
@@ -108,18 +166,32 @@ class DeckImageGenerator:
             return None
         return CardSizer.calculate(area, card_count, padding=self.config.padding)
 
-    def _auto_output_name(self):
-        """Generate an auto-incremented output filename."""
-        prefix = "deck_output_"
-        suffix = ".png"
-        existing = [
-            f for f in os.listdir(".")
-            if f.startswith(prefix) and f.endswith(suffix)
-        ]
-        numbers = []
-        for f in existing:
-            num_str = f[len(prefix):-len(suffix)]
-            if num_str.isdigit():
-                numbers.append(int(num_str))
-        next_num = max(numbers, default=0) + 1
-        return f"{prefix}{next_num}{suffix}"
+    def _auto_output_name(self, deck_file, player=None, deck_index=0, is_multi_deck=False):
+        """
+        Generate an output filename based on the input file.
+
+        - Base name from input file (without extension)
+        - Multi-deck CSV: append _PlayerName or _index_N
+        - Auto-increment if file exists: name.png, name_2.png, etc.
+        """
+        import re
+        base = os.path.splitext(os.path.basename(deck_file))[0]
+
+        # For multi-deck CSVs, add a disambiguator
+        if is_multi_deck:
+            if player:
+                # Sanitize player name for use in a filename
+                safe_player = re.sub(r'[^\w\-. ]', '', player).strip().replace(' ', '_')
+                base = f"{base}_{safe_player}"
+            else:
+                base = f"{base}_index_{deck_index}"
+
+        # Auto-increment if file already exists
+        candidate = f"{base}.png"
+        if not os.path.isfile(candidate):
+            return candidate
+
+        n = 2
+        while os.path.isfile(f"{base}_{n}.png"):
+            n += 1
+        return f"{base}_{n}.png"

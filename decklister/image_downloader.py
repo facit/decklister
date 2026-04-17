@@ -2,9 +2,19 @@ import os
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+try:
+    from .app_paths import get_image_cache_dir
+except ImportError:
+    from decklister.app_paths import get_image_cache_dir
+
 
 CDN_BASE = "https://swudb.com/images/cards"
 MAX_WORKERS = 8  # Number of concurrent downloads
+
+
+def _images_dir():
+    """Get the base directory for card images."""
+    return get_image_cache_dir()
 
 
 def download_images(card_set, card_number=None):
@@ -20,7 +30,7 @@ def download_images(card_set, card_number=None):
         print("No card set specified.")
         return
 
-    output_dir = os.path.join("images", card_set)
+    output_dir = os.path.join(_images_dir(), card_set)
     os.makedirs(output_dir, exist_ok=True)
 
     if card_number is not None:
@@ -45,13 +55,13 @@ def download_images_batch(cards):
     # Deduplicate and prepare output dirs
     unique_cards = list(set(cards))
     for card_set, _ in unique_cards:
-        os.makedirs(os.path.join("images", card_set), exist_ok=True)
+        os.makedirs(os.path.join(_images_dir(), card_set), exist_ok=True)
 
     # Filter out already-downloaded cards
     to_download = []
     for card_set, card_number in unique_cards:
         num_str = str(card_number).zfill(3) if str(card_number).isdigit() else str(card_number)
-        filepath = os.path.join("images", card_set, f"{num_str}.png")
+        filepath = os.path.join(_images_dir(), card_set, f"{num_str}.png")
         if not os.path.isfile(filepath):
             to_download.append((card_set, card_number))
 
@@ -62,7 +72,7 @@ def download_images_batch(cards):
 
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {
-            executor.submit(download_card, card_set, card_number, os.path.join("images", card_set)): (card_set, card_number)
+            executor.submit(download_card, card_set, card_number, os.path.join(_images_dir(), card_set)): (card_set, card_number)
             for card_set, card_number in to_download
         }
         for future in as_completed(futures):

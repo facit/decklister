@@ -8,14 +8,17 @@ Resolved names are cached in card_cache.json to avoid redundant API calls.
 import csv
 import json
 import os
+import sys
 import urllib.parse
 import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 try:
     from .deck import Card, Deck
+    from .app_paths import get_card_cache_path
 except ImportError:
     from decklister.deck import Card, Deck
+    from decklister.app_paths import get_card_cache_path
 
 SWUDB_SEARCH = "https://swudb.com/api/search"
 SWUDB_HEADERS = {
@@ -28,17 +31,16 @@ SWUDB_HEADERS = {
 }
 MAX_WORKERS = 4  # Conservative to avoid rate-limiting
 
-CACHE_PATH = os.path.join(os.path.dirname(__file__), "card_cache.json")
-
 
 def _cache_key(name, subtitle):
     return f"{name}|{subtitle}" if subtitle else name
 
 
 def _load_cache():
-    if os.path.exists(CACHE_PATH):
+    cache_path = get_card_cache_path()
+    if os.path.exists(cache_path):
         try:
-            with open(CACHE_PATH, "r", encoding="utf-8") as f:
+            with open(cache_path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -46,8 +48,9 @@ def _load_cache():
 
 
 def _save_cache(cache):
+    cache_path = get_card_cache_path()
     try:
-        with open(CACHE_PATH, "w", encoding="utf-8") as f:
+        with open(cache_path, "w", encoding="utf-8") as f:
             json.dump(cache, f, ensure_ascii=False, indent=2)
     except Exception as e:
         print(f"Warning: could not save card cache: {e}")
@@ -88,6 +91,21 @@ def _lookup_card_id(name, subtitle):
     except Exception as e:
         print(f"Warning: lookup failed for '{name}': {e}")
         return None
+
+
+def _count_rows(path):
+    """Quick count of data rows in a CSV file (without full parsing)."""
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+        if raw.startswith(b'\xef\xbb\xbf'):
+            raw = raw[3:]
+        text = raw.decode("utf-8", errors="replace")
+        import io
+        reader = csv.DictReader(io.StringIO(text))
+        return sum(1 for _ in reader)
+    except Exception:
+        return 1
 
 
 def _select_row(rows, player_name=None, deck_index=0):
@@ -141,10 +159,29 @@ def parse_melee_csv(path, player_name=None, deck_index=0):
     Returns:
         Deck object ready for rendering.
     """
-    # utf-8-sig automatically strips the UTF-8 BOM that Melee prepends
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        rows = list(reader)
+    # Read raw bytes to detect encoding issues
+    with open(path, "rb") as f:
+        raw = f.read()
+
+    # Strip UTF-8 BOM if present
+    if raw.startswith(b'\xef\xbb\xbf'):
+        raw = raw[3:]
+
+    # Decode as UTF-8
+    text = raw.decode("utf-8", errors="replace")
+
+    # Repair double UTF-8 encoding: if text was UTF-8 encoded twice,
+    # re-encoding as latin-1 gives back the original UTF-8 bytes
+    try:
+        repaired = text.encode("latin-1").decode("utf-8")
+        # If that worked without error, it was double-encoded
+        text = repaired
+    except (UnicodeDecodeError, UnicodeEncodeError):
+        pass  # Not double-encoded, keep as-is
+
+    import io
+    reader = csv.DictReader(io.StringIO(text))
+    rows = list(reader)
 
     row = _select_row(rows, player_name=player_name, deck_index=deck_index)
 
