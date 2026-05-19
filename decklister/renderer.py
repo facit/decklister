@@ -2,10 +2,8 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 try:
     from .count_overlay import CountOverlay
-    from .app_paths import get_image_cache_dir
 except ImportError:
     from decklister.count_overlay import CountOverlay
-    from decklister.app_paths import get_image_cache_dir
 
 # Corner radius measured at the source image resolution (1117x1560)
 SOURCE_CORNER_RADIUS = 46
@@ -28,7 +26,8 @@ class Renderer:
     def __init__(self, config, count_overlay=None):
         self.config = config
         self.count_overlay = count_overlay or CountOverlay(
-            count_background=config.count_background
+            count_background=config.count_background,
+            font_path=config.count_font,
         )
 
     def render(self, deck, deck_layout, sb_layout):
@@ -297,4 +296,4 @@ class Renderer:
 
     def _card_image_path(self, card):
         """Build the file path for a card image."""
-        return os.path.join(get_image_cache_dir(), card.card_set, f"{card.card_number}.png")
+        return os.path.join("images", card.card_set, f"{card.card_number}.png")

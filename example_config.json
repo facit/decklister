@@ -1,25 +1,40 @@
 {
-  "resolution": [1920, 1080],
-  "layers": [
-    "example_background.png",
-    {"type": "cards"},
-	{"type": "csv_field", "column": "DeckName", "position": [90, 20], "size": 30, "color": [255, 255, 255], "font": "C:/Windows/Fonts/arial.ttf"},
-    {
-      "type": "text",
-      "text": "By: ",
-      "position": [90, 50],
-      "size": 20,
-      "color": [255, 255, 255],
-      "font": "C:/Windows/Fonts/arial.ttf"
-    },
-	{"type": "csv_field", "column": "OwnerDisplayName", "position": [120, 50], "size": 20, "color": [255, 255, 255], "font": "C:/Windows/Fonts/arial.ttf"},
-    "example_foreground.png"
+  "resolution": [
+    1920,
+    1080
   ],
-  "leader_areas": [[90, 90, 390, 290]],
-  "base_areas": [[90, 310, 390, 510]],
-  "deck_area": [430, 90, 1870, 720],
-  "sb_area": [430, 780, 1870, 1010],
   "padding": 10,
-  "count_background": "example_count_background.png",
-  "uniform_card_size": true
+  "uniform_card_size": false,
+  "layers": [
+    {
+      "type": "image",
+      "path": "/home/pontus/Documents/workspace/decklister/example_background.png"
+    },
+    {
+      "type": "cards"
+    },
+    {
+      "type": "image",
+      "path": "/home/pontus/Documents/workspace/decklister/example_foreground.png"
+    }
+  ],
+  "deck_area": [
+    79,
+    90,
+    1844,
+    694
+  ],
+  "sb_area": [
+    358,
+    709,
+    1546,
+    1010
+  ],
+  "misc_area": [
+    77,
+    710,
+    351,
+    1006
+  ],
+  "count_background": "/home/pontus/Documents/workspace/decklister/example_count_background.png"
 }

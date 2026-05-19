@@ -30,13 +30,14 @@ class DeckImageGenerator:
         self.hyperspace = hyperspace
         self.showcase = showcase
 
-    def run(self, deck_file, output_path=None, player=None, deck_index=0):
+    def run(self, deck_file, output_path=None, output_dir=None, player=None, deck_index=0):
         """
         Generate a deck image from a deck file.
 
         Args:
             deck_file: Path to the deck file (.json or Melee.gg .csv).
             output_path: Optional output file path. Auto-named if not provided.
+            output_dir: Optional output file dir. Current dir if not provided.
             player: (CSV only) Player name to select from a multi-deck CSV.
             deck_index: (CSV only) 0-based row index when player is not given.
         """
@@ -61,15 +62,16 @@ class DeckImageGenerator:
             print(f"Error loading deck: {e}")
             return
 
-        self._generate_image(deck, deck_file, output_path, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
+        self._generate_image(deck, deck_file, output_path, output_dir, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
 
-    def run_all(self, deck_file, output_path=None):
+    def run_all(self, deck_file, output_path=None, output_dir=None):
         """
         Generate deck images for ALL decks in a Melee CSV export.
 
         Args:
             deck_file: Path to a Melee.gg CSV file.
             output_path: Not used (each deck gets an auto-named output).
+            output_dir: Optional output file dir. Current dir if not provided.
         """
         if not deck_file:
             print("No deck file provided.")
@@ -78,7 +80,7 @@ class DeckImageGenerator:
         ext = os.path.splitext(deck_file)[1].lower()
         if ext != ".csv":
             print("--all only works with CSV files. Running single deck instead.")
-            self.run(deck_file, output_path=output_path)
+            self.run(deck_file, output_path=output_path, output_dir=output_dir)
             return
 
         try:
@@ -99,13 +101,13 @@ class DeckImageGenerator:
                 deck = parse_melee_csv(deck_file, deck_index=i)
                 display = deck.metadata.get("OwnerDisplayName") or deck.metadata.get("OwnerUsername", f"index {i}")
                 print(f"\n--- Deck {i + 1}/{total}: {display} ---")
-                self._generate_image(deck, deck_file, output_path=None, deck_index=i, is_multi_deck=is_multi_deck)
+                self._generate_image(deck, deck_file, output_path=None, output_dir=output_dir, deck_index=i, is_multi_deck=is_multi_deck)
             except Exception as e:
                 print(f"Error processing deck {i}: {e}")
 
         print(f"\nDone — {total} deck(s) processed.")
 
-    def _generate_image(self, deck, deck_file, output_path=None, player=None, deck_index=0, is_multi_deck=False):
+    def _generate_image(self, deck, deck_file, output_path=None, output_dir=None, player=None, deck_index=0, is_multi_deck=False):
         """
         Generate and save a single deck image.
 
@@ -113,6 +115,7 @@ class DeckImageGenerator:
             deck: Deck object.
             deck_file: Original input file path (for auto-naming).
             output_path: Optional explicit output path.
+            output_dir: Optional output file dir. Current dir if not provided.
             player: Player name (for auto-naming).
             deck_index: Deck index (for auto-naming).
             is_multi_deck: Whether the source has multiple decks.
@@ -138,6 +141,8 @@ class DeckImageGenerator:
 
         # Save
         output_path = output_path or self._auto_output_name(deck_file, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
+        if output_dir is not None:
+            output_path = os.path.join(output_dir, output_path)
         image.save(output_path)
         print(f"Deck image saved as {output_path}")
 

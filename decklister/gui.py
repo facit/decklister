@@ -1,4 +1,3 @@
-import shutil
 import sys
 import os
 import subprocess
@@ -17,11 +16,6 @@ try:
 except ImportError:
     from decklister.deck_image_generator import DeckImageGenerator
     from decklister.config import Config
-
-try:
-    from .app_paths import get_app_data_dir
-except ImportError:
-    from decklister.app_paths import get_app_data_dir
 
 
 class LogSignal(QObject):
@@ -91,6 +85,17 @@ class DeckListerGUI(QMainWindow):
         output_row.addWidget(output_browse)
         input_layout.addLayout(output_row)
 
+        # Output directory (optional)
+        outdir_row = QHBoxLayout()
+        outdir_row.addWidget(QLabel("Output Dir:"))
+        self.outdir_input = QLineEdit()
+        self.outdir_input.setPlaceholderText("(Optional) Current directory if left empty")
+        outdir_row.addWidget(self.outdir_input)
+        outdir_browse = QPushButton("Browse...")
+        outdir_browse.clicked.connect(self._browse_outdir)
+        outdir_row.addWidget(outdir_browse)
+        input_layout.addLayout(outdir_row)
+
         layout.addWidget(input_group)
 
         # --- CSV Options (shown only when a .csv file is selected) ---
@@ -149,7 +154,7 @@ class DeckListerGUI(QMainWindow):
         self.generate_btn.clicked.connect(self._generate)
         actions_layout.addWidget(self.generate_btn)
 
-        self.config_drawer_btn = QPushButton("Open Config Drawer")
+        self.config_drawer_btn = QPushButton("Config Editor")
         self.config_drawer_btn.setMinimumHeight(40)
         self.config_drawer_btn.clicked.connect(self._open_config_drawer)
         actions_layout.addWidget(self.config_drawer_btn)
@@ -158,11 +163,6 @@ class DeckListerGUI(QMainWindow):
         self.export_examples_btn.setMinimumHeight(40)
         self.export_examples_btn.clicked.connect(self._export_examples)
         actions_layout.addWidget(self.export_examples_btn)
-
-        self.clear_cache_btn = QPushButton("Clear Cache")
-        self.clear_cache_btn.setMinimumHeight(40)
-        self.clear_cache_btn.clicked.connect(self._clear_cache)
-        actions_layout.addWidget(self.clear_cache_btn)
 
         layout.addLayout(actions_layout)
 
@@ -210,6 +210,11 @@ class DeckListerGUI(QMainWindow):
         if path:
             self.output_input.setText(path)
 
+    def _browse_outdir(self):
+        path = QFileDialog.getExistingDirectory(self, "Select Output Directory")
+        if path:
+            self.outdir_input.setText(path)
+
     # --- Generation ---
 
     def _generate(self):
@@ -236,6 +241,10 @@ class DeckListerGUI(QMainWindow):
         self._append_log(f"  Config: {config_file}")
         if output_file:
             self._append_log(f"  Output: {output_file}")
+
+        output_dir = self.outdir_input.text().strip() or None
+        if output_dir:
+            self._append_log(f"  Output Dir: {output_dir}")
 
         hyperspace = self.hyperspace_check.isChecked()
         showcase = self.showcase_check.isChecked()
@@ -268,12 +277,12 @@ class DeckListerGUI(QMainWindow):
         # Run in a thread to keep the GUI responsive
         thread = threading.Thread(
             target=self._run_generator,
-            args=(deck_file, config_file, output_file, hyperspace, showcase, player, deck_index, generate_all),
+            args=(deck_file, config_file, output_file, output_dir, hyperspace, showcase, player, deck_index, generate_all),
             daemon=True,
         )
         thread.start()
 
-    def _run_generator(self, deck_file, config_file, output_file, hyperspace, showcase, player, deck_index, generate_all):
+    def _run_generator(self, deck_file, config_file, output_file, output_dir, hyperspace, showcase, player, deck_index, generate_all):
         """Worker thread that runs the generator and streams log messages in real-time."""
 
         # Custom stream that emits each line to the GUI as it's written
@@ -307,9 +316,9 @@ class DeckListerGUI(QMainWindow):
             sys.stderr = stream
             try:
                 if generate_all:
-                    generator.run_all(deck_file, output_path=output_file)
+                    generator.run_all(deck_file, output_path=output_file, output_dir=output_dir)
                 else:
-                    generator.run(deck_file, output_path=output_file, player=player, deck_index=deck_index)
+                    generator.run(deck_file, output_path=output_file, output_dir=output_dir, player=player, deck_index=deck_index)
             finally:
                 sys.stdout = old_stdout
                 sys.stderr = old_stderr
@@ -324,34 +333,31 @@ class DeckListerGUI(QMainWindow):
     # --- Config Drawer ---
 
     def _open_config_drawer(self):
-        """Launch the config drawer."""
-        self._append_log("Opening Config Drawer...")
+        """Launch the config editor."""
+        self._append_log("Opening Config Editor...")
         try:
             if getattr(sys, 'frozen', False):
                 # Running as PyInstaller bundle — import and run directly in a thread
-                def run_drawer():
+                def run_editor():
                     try:
-                        import tkinter as tk
                         try:
-                            from .config_drawer import AreaDrawer
+                            from .config_editor import main
                         except ImportError:
-                            from decklister.config_drawer import AreaDrawer
-                        root = tk.Tk()
-                        AreaDrawer(root)
-                        root.mainloop()
+                            from decklister.config_editor import main
+                        main()
                     except Exception as e:
-                        self.log_signal.message.emit(f"Config Drawer error: {e}")
+                        self.log_signal.message.emit(f"Config Editor error: {e}")
 
-                thread = threading.Thread(target=run_drawer, daemon=True)
+                thread = threading.Thread(target=run_editor, daemon=True)
                 thread.start()
             else:
                 # Running in development — launch as subprocess
                 subprocess.Popen(
-                    [sys.executable, "-m", "decklister.config_drawer"],
+                    [sys.executable, "-m", "decklister.config_editor"],
                     cwd=os.getcwd(),
                 )
         except Exception as e:
-            self._append_log(f"Error launching Config Drawer: {e}")
+            self._append_log(f"Error launching Config Editor: {e}")
 
     # --- Export Examples ---
 
@@ -398,30 +404,6 @@ class DeckListerGUI(QMainWindow):
             self._append_log(f"✓ {exported} example file(s) exported to {target_dir}")
         else:
             self._append_log("✗ No example files found to export.")
-
-    # --- Clear Cache ---
-    def _clear_cache(self):
-        """Clear the card image cache."""
-        self._append_log("Clearing cache...")
-        try:
-            cache_dir = get_app_data_dir()
-            self._append_log(f"Cache directory: {cache_dir}")
-            if os.path.isdir(cache_dir):
-                # Remove all files in the cache directory
-                for filename in os.listdir(cache_dir):
-                    file_path = os.path.join(cache_dir, filename)
-                    try:
-                        if os.path.isfile(file_path) or os.path.islink(file_path):
-                            os.unlink(file_path)
-                        elif os.path.isdir(file_path):
-                            shutil.rmtree(file_path)
-                    except Exception as e:
-                        self._append_log(f"Failed to delete {file_path}: {e}")
-                self._append_log("✓ Cache cleared.")
-            else:
-                self._append_log("Cache directory not found, nothing to clear.")
-        except Exception as e:
-            self._append_log(f"Error clearing cache: {e}")
 
     # --- UI Helpers ---
 

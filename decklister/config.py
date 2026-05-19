@@ -10,18 +10,22 @@ class Config:
         base_areas=None,
         deck_area=None,
         sb_area=None,
+        misc_area=None,
         count_background=None,
+        count_font=None,
         padding=3,
         uniform_card_size=True,
     ):
         self.resolution = tuple(resolution)
-        self.layers = layers or []  # Ordered list of layer specs; see from_file for format
-        self.leader_areas = leader_areas or []  # List of [x0, y0, x1, y1]
-        self.base_areas = base_areas or []  # List of [x0, y0, x1, y1]
-        self.deck_area = deck_area  # [x0, y0, x1, y1]
-        self.sb_area = sb_area  # [x0, y0, x1, y1]
-        self.count_background = count_background  # Path to image
-        self.padding = padding  # Padding between individual card images
+        self.layers = layers or []
+        self.leader_areas = leader_areas or []
+        self.base_areas = base_areas or []
+        self.deck_area = deck_area
+        self.sb_area = sb_area
+        self.misc_area = misc_area
+        self.count_background = count_background
+        self.count_font = count_font  # Path to font file for count overlay
+        self.padding = padding
         self.uniform_card_size = uniform_card_size
 
     @classmethod
@@ -70,7 +74,9 @@ class Config:
             base_areas=data.get("base_areas"),
             deck_area=data.get("deck_area"),
             sb_area=data.get("sb_area"),
+            misc_area=data.get("misc_area"),
             count_background=data.get("count_background"),
+            count_font=data.get("count_font"),
             padding=data.get("padding", 3),
             uniform_card_size=data.get("uniform_card_size", True),
         )

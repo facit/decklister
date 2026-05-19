@@ -9,14 +9,16 @@ class CountOverlay:
     Subclass and override apply() to change the style.
     """
 
-    def __init__(self, count_background=None, blur_fraction=0.15, font_size_ratio=0.2):
+    def __init__(self, count_background=None, font_path=None, blur_fraction=0.15, font_size_ratio=0.2):
         """
         Args:
             count_background: Path to an image to use behind the count text (optional).
+            font_path: Path to a .ttf/.otf font file (optional). Falls back to arial then default.
             blur_fraction: Fraction of card height to blur at the bottom.
             font_size_ratio: Font size as a fraction of card width.
         """
         self.count_background = count_background
+        self.font_path = font_path
         self.blur_fraction = blur_fraction
         self.font_size_ratio = font_size_ratio
 
@@ -48,10 +50,17 @@ class CountOverlay:
 
         # Load font
         font_size = max(10, int(card_width * self.font_size_ratio))
-        try:
-            font = ImageFont.truetype("arial.ttf", font_size)
-        except Exception:
-            font = ImageFont.load_default()
+        font = None
+        if self.font_path:
+            try:
+                font = ImageFont.truetype(self.font_path, font_size)
+            except Exception:
+                pass
+        if font is None:
+            try:
+                font = ImageFont.truetype("arial.ttf", font_size)
+            except Exception:
+                font = ImageFont.load_default()
 
         # Measure text
         draw = ImageDraw.Draw(card_img)
