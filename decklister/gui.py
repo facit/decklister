@@ -333,23 +333,17 @@ class DeckListerGUI(QMainWindow):
     # --- Config Drawer ---
 
     def _open_config_drawer(self):
-        """Launch the config editor."""
+        """Launch the config editor as a separate window."""
         self._append_log("Opening Config Editor...")
         try:
             if getattr(sys, 'frozen', False):
-                # Running as PyInstaller bundle — import and run directly in a thread
-                def run_editor():
-                    try:
-                        try:
-                            from .config_editor import main
-                        except ImportError:
-                            from decklister.config_editor import main
-                        main()
-                    except Exception as e:
-                        self.log_signal.message.emit(f"Config Editor error: {e}")
-
-                thread = threading.Thread(target=run_editor, daemon=True)
-                thread.start()
+                # Running as PyInstaller bundle — open as a new window in this process
+                try:
+                    from .config_editor import ConfigEditor
+                except ImportError:
+                    from decklister.config_editor import ConfigEditor
+                self._config_editor_window = ConfigEditor()
+                self._config_editor_window.show()
             else:
                 # Running in development — launch as subprocess
                 subprocess.Popen(
@@ -439,6 +433,7 @@ class DeckListerGUI(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setProperty("_decklister_running", True)
     window = DeckListerGUI()
     window.show()
     sys.exit(app.exec())

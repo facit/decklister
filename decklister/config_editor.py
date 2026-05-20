@@ -39,14 +39,14 @@ AREA_COLORS = {
     "base_area":    QColor(60, 100, 220, 80),
     "deck_area":    QColor(60, 180, 60, 80),
     "sb_area":      QColor(220, 180, 40, 80),
-    "misc_area":    QColor(180, 180, 180, 80),
+    "misc_area":    QColor(180, 80, 220, 80),
 }
 AREA_BORDER_COLORS = {
     "leader_area":  QColor(220, 60, 60, 200),
     "base_area":    QColor(60, 100, 220, 200),
     "deck_area":    QColor(60, 180, 60, 200),
     "sb_area":      QColor(220, 180, 40, 200),
-    "misc_area":    QColor(180, 180, 180, 200),
+    "misc_area":    QColor(180, 80, 220, 200),
 }
 AREA_LABELS = {
     "leader_area":  "Leader",
@@ -931,7 +931,7 @@ class ConfigEditor(QMainWindow):
         deck_area = None
         sb_area = None
         misc_area = None
-        
+
         for rect in self._areas:
             coords = rect.get_coords()
             if rect.area_type == "leader_area":
@@ -1171,10 +1171,11 @@ class ConfigEditor(QMainWindow):
 
 
 def main():
-    app = QApplication(sys.argv)
+    app = QApplication.instance() or QApplication(sys.argv)
     window = ConfigEditor()
     window.show()
-    sys.exit(app.exec())
+    if not app.property("_decklister_running"):
+        sys.exit(app.exec())
 
 
 if __name__ == "__main__":
