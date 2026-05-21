@@ -40,6 +40,7 @@ AREA_COLORS = {
     "deck_area":    QColor(60, 180, 60, 80),
     "sb_area":      QColor(220, 180, 40, 80),
     "misc_area":    QColor(180, 80, 220, 80),
+    "image_area":   QColor(220, 140, 40, 80),
 }
 AREA_BORDER_COLORS = {
     "leader_area":  QColor(220, 60, 60, 200),
@@ -47,6 +48,7 @@ AREA_BORDER_COLORS = {
     "deck_area":    QColor(60, 180, 60, 200),
     "sb_area":      QColor(220, 180, 40, 200),
     "misc_area":    QColor(180, 80, 220, 200),
+    "image_area":   QColor(220, 140, 40, 200),
 }
 AREA_LABELS = {
     "leader_area":  "Leader",
@@ -54,9 +56,28 @@ AREA_LABELS = {
     "deck_area":    "Deck",
     "sb_area":      "Sideboard",
     "misc_area":    "Misc",
+    "image_area":   "Image",
 }
 
 FONT_FILTER = "Font Files (*.ttf *.otf *.TTF *.OTF);;All Files (*)"
+
+
+def _system_font_dir():
+    """Return the system fonts directory."""
+    if sys.platform == "win32":
+        # C:\Windows\Fonts is often restricted; use the user font dir instead
+        user_fonts = os.path.join(os.environ.get("LOCALAPPDATA", ""), "Microsoft", "Windows", "Fonts")
+        if os.path.isdir(user_fonts):
+            return user_fonts
+        # Fallback to system fonts (may work on some Windows versions)
+        return os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
+    elif sys.platform == "darwin":
+        return "/Library/Fonts"
+    else:
+        for d in ["/usr/share/fonts", "/usr/local/share/fonts", os.path.expanduser("~/.fonts")]:
+            if os.path.isdir(d):
+                return d
+    return ""
 
 
 # ── Resizable/draggable rectangle ───────────────────────────────────────
@@ -65,11 +86,12 @@ class ResizableRect(QGraphicsRectItem):
 
     HANDLE_SIZE = 8
 
-    def __init__(self, x, y, w, h, area_type, label="", parent_editor=None):
+    def __init__(self, x, y, w, h, area_type, label="", parent_editor=None, image_path=None):
         super().__init__(x, y, w, h)
         self.area_type = area_type
         self.label = label
         self.parent_editor = parent_editor
+        self.image_path = image_path  # For misc_area: optional image to place in this area
         self._resizing = None
         self._drag_start = None
 
@@ -78,6 +100,7 @@ class ResizableRect(QGraphicsRectItem):
         self.setBrush(QBrush(fill))
         self.setPen(QPen(border, 2))
         self.setFlag(QGraphicsRectItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsRectItem.ItemIsFocusable, True)
         self.setAcceptHoverEvents(True)
         self.setZValue(10)
 
@@ -91,6 +114,25 @@ class ResizableRect(QGraphicsRectItem):
             int(pos.x() + r.x() + r.width()),
             int(pos.y() + r.y() + r.height()),
         ]
+
+    def keyPressEvent(self, event):
+        """Move the rectangle with arrow keys."""
+        step = 10 if event.modifiers() & Qt.ShiftModifier else 1
+        key = event.key()
+        if key == Qt.Key_Left:
+            self.setPos(self.pos().x() - step, self.pos().y())
+        elif key == Qt.Key_Right:
+            self.setPos(self.pos().x() + step, self.pos().y())
+        elif key == Qt.Key_Up:
+            self.setPos(self.pos().x(), self.pos().y() - step)
+        elif key == Qt.Key_Down:
+            self.setPos(self.pos().x(), self.pos().y() + step)
+        else:
+            super().keyPressEvent(event)
+            return
+        if self.parent_editor:
+            self.parent_editor._on_area_changed()
+        event.accept()
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
@@ -286,7 +328,7 @@ class TextLayerDialog(QDialog):
         self._pos_widget.setVisible(text == "position")
 
     def _browse_font(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Select Font", "", FONT_FILTER)
+        path, _ = QFileDialog.getOpenFileName(self, "Select Font", _system_font_dir(), FONT_FILTER)
         if path:
             self._font_path = path
             self._font_label.setText(os.path.basename(path))
@@ -430,6 +472,23 @@ class ConfigEditor(QMainWindow):
         self._view.setAlignment(Qt.AlignLeft | Qt.AlignTop)
         canvas_layout.addWidget(self._view)
 
+        # Canvas controls
+        canvas_controls = QHBoxLayout()
+        fit_btn = QPushButton("Fit to Window")
+        fit_btn.clicked.connect(self._fit_to_window)
+        canvas_controls.addWidget(fit_btn)
+        zoom_in_btn = QPushButton("Zoom In")
+        zoom_in_btn.clicked.connect(lambda: self._view.scale(1.25, 1.25))
+        canvas_controls.addWidget(zoom_in_btn)
+        zoom_out_btn = QPushButton("Zoom Out")
+        zoom_out_btn.clicked.connect(lambda: self._view.scale(0.8, 0.8))
+        canvas_controls.addWidget(zoom_out_btn)
+        reset_zoom_btn = QPushButton("1:1")
+        reset_zoom_btn.clicked.connect(self._reset_zoom)
+        canvas_controls.addWidget(reset_zoom_btn)
+        canvas_controls.addStretch()
+        canvas_layout.addLayout(canvas_controls)
+
         self._bg_item = None
         self._fg_item = None
         self._preview_item = None
@@ -523,7 +582,7 @@ class ConfigEditor(QMainWindow):
 
         add_area_row = QHBoxLayout()
         self._area_type_combo = QComboBox()
-        self._area_type_combo.addItems(["leader_area", "base_area", "deck_area", "sb_area", "misc_area"])
+        self._area_type_combo.addItems(["leader_area", "base_area", "deck_area", "sb_area", "image_area", "misc_area"])
         add_area_row.addWidget(self._area_type_combo)
         add_btn = QPushButton("Add Area")
         add_btn.clicked.connect(self._add_area)
@@ -538,6 +597,11 @@ class ConfigEditor(QMainWindow):
         del_area_btn = QPushButton("Delete Selected Area")
         del_area_btn.clicked.connect(self._delete_area)
         area_layout.addWidget(del_area_btn)
+
+        misc_img_btn = QPushButton("Set Image for Image Area")
+        misc_img_btn.setToolTip("Assign an image to the selected image_area (aspect-ratio preserved)")
+        misc_img_btn.clicked.connect(self._set_area_image)
+        area_layout.addWidget(misc_img_btn)
 
         coord_group = QGroupBox("Selected Area Coordinates")
         coord_form = QFormLayout(coord_group)
@@ -653,6 +717,14 @@ class ConfigEditor(QMainWindow):
         splitter.setSizes([800, 400])
 
     # ── Canvas management ───────────────────────────────────────────────
+    def _fit_to_window(self):
+        """Fit the entire scene into the view."""
+        self._view.fitInView(self._scene.sceneRect(), Qt.KeepAspectRatio)
+
+    def _reset_zoom(self):
+        """Reset zoom to 1:1."""
+        self._view.resetTransform()
+
     def _update_canvas_size(self):
         w, h = self._resolution
         self._scene.setSceneRect(0, 0, w, h)
@@ -768,7 +840,7 @@ class ConfigEditor(QMainWindow):
 
     def _browse_count_font(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select Count Font", "", FONT_FILTER
+            self, "Select Count Font", _system_font_dir(), FONT_FILTER
         )
         if path:
             self._count_font_path = path
@@ -791,11 +863,19 @@ class ConfigEditor(QMainWindow):
             self._refresh_area_list()
 
     def _refresh_area_list(self):
+        current = self._area_list.currentRow()
+        self._area_list.blockSignals(True)
         self._area_list.clear()
         for rect in self._areas:
             coords = rect.get_coords()
             label = AREA_LABELS.get(rect.area_type, rect.area_type)
-            self._area_list.addItem(f"{label}: [{coords[0]}, {coords[1]}, {coords[2]}, {coords[3]}]")
+            text = f"{label}: [{coords[0]}, {coords[1]}, {coords[2]}, {coords[3]}]"
+            if rect.area_type == "image_area" and rect.image_path:
+                text += f" ({os.path.basename(rect.image_path)})"
+            self._area_list.addItem(text)
+        if 0 <= current < len(self._areas):
+            self._area_list.setCurrentRow(current)
+        self._area_list.blockSignals(False)
 
     def _on_area_selected(self, row):
         for rect in self._areas:
@@ -835,6 +915,25 @@ class ConfigEditor(QMainWindow):
             self._coord_x1.setValue(coords[2])
             self._coord_y1.setValue(coords[3])
             self._updating_coords = False
+
+    def _set_area_image(self):
+        """Assign an image to the selected image_area."""
+        row = self._area_list.currentRow()
+        if not (0 <= row < len(self._areas)):
+            self._statusbar.showMessage("No area selected.")
+            return
+        rect = self._areas[row]
+        if rect.area_type != "image_area":
+            self._statusbar.showMessage("Image can only be set on image_area type.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image for Area", "",
+            "Image Files (*.png *.jpg *.jpeg *.bmp *.svg);;All Files (*)"
+        )
+        if path:
+            rect.image_path = path
+            self._refresh_area_list()
+            self._statusbar.showMessage(f"Image set: {os.path.basename(path)}")
 
     # ── Text layers ─────────────────────────────────────────────────────
     def _add_text_layer(self):
@@ -930,7 +1029,8 @@ class ConfigEditor(QMainWindow):
         base_areas = []
         deck_area = None
         sb_area = None
-        misc_area = None
+        misc_areas = []
+        image_areas = []
 
         for rect in self._areas:
             coords = rect.get_coords()
@@ -942,8 +1042,13 @@ class ConfigEditor(QMainWindow):
                 deck_area = coords
             elif rect.area_type == "sb_area":
                 sb_area = coords
+            elif rect.area_type == "image_area":
+                entry = {"area": coords}
+                if rect.image_path:
+                    entry["image"] = rect.image_path
+                image_areas.append(entry)
             elif rect.area_type == "misc_area":
-                misc_area = coords
+                misc_areas.append(coords)
 
         layers = []
         if self._bg_path:
@@ -964,7 +1069,8 @@ class ConfigEditor(QMainWindow):
             base_areas=base_areas,
             deck_area=deck_area,
             sb_area=sb_area,
-            misc_area=misc_area,
+            image_areas=image_areas,
+            misc_areas=misc_areas,
             count_background=self._count_bg_path,
             count_font=self._count_font_path,
             padding=self._padding_spin.value(),
@@ -989,12 +1095,14 @@ class ConfigEditor(QMainWindow):
             data["deck_area"] = config.deck_area
         if config.sb_area:
             data["sb_area"] = config.sb_area
-        if config.misc_area:
-            data["misc_area"] = config.misc_area
         if config.count_background:
             data["count_background"] = config.count_background
         if config.count_font:
             data["count_font"] = config.count_font
+        if config.image_areas:
+            data["image_areas"] = config.image_areas
+        if config.misc_areas:
+            data["misc_areas"] = config.misc_areas
         return data
 
     # ── File operations ─────────────────────────────────────────────────
@@ -1124,8 +1232,20 @@ class ConfigEditor(QMainWindow):
             self._add_area_from_coords("deck_area", data["deck_area"])
         if data.get("sb_area"):
             self._add_area_from_coords("sb_area", data["sb_area"])
-        if data.get("misc_area"):
-            self._add_area_from_coords("misc_area", data["misc_area"])
+        for entry in data.get("misc_areas", []):
+            if isinstance(entry, dict):
+                coords = entry.get("area", [0, 0, 100, 100])
+                self._add_area_from_coords("misc_area", coords)
+            elif isinstance(entry, (list, tuple)):
+                self._add_area_from_coords("misc_area", entry)
+
+        for entry in data.get("image_areas", []):
+            if isinstance(entry, dict):
+                coords = entry.get("area", [0, 0, 100, 100])
+                image_path = entry.get("image")
+                if image_path:
+                    image_path = self._resolve_path(image_path, config_dir)
+                self._add_area_from_coords("image_area", coords, image_path=image_path)
 
         self._refresh_area_list()
         self._refresh_text_list()
@@ -1139,9 +1259,9 @@ class ConfigEditor(QMainWindow):
             return resolved
         return path
 
-    def _add_area_from_coords(self, area_type, coords):
+    def _add_area_from_coords(self, area_type, coords, image_path=None):
         x0, y0, x1, y1 = coords
-        rect = ResizableRect(0, 0, x1 - x0, y1 - y0, area_type, parent_editor=self)
+        rect = ResizableRect(0, 0, x1 - x0, y1 - y0, area_type, parent_editor=self, image_path=image_path)
         rect.setPos(x0, y0)
         self._scene.addItem(rect)
         self._areas.append(rect)

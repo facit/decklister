@@ -2,8 +2,10 @@ import os
 from PIL import Image, ImageDraw, ImageFont
 try:
     from .count_overlay import CountOverlay
+    from .app_paths import get_image_cache_dir
 except ImportError:
     from decklister.count_overlay import CountOverlay
+    from decklister.app_paths import get_image_cache_dir
 
 # Corner radius measured at the source image resolution (1117x1560)
 SOURCE_CORNER_RADIUS = 46
@@ -53,6 +55,7 @@ class Renderer:
             elif layer_type == "image":
                 self._apply_image_layer(canvas, layer_data["path"], layer_data.get("area"))
             elif layer_type == "cards":
+                self._draw_image_areas(canvas)
                 self._draw_leaders(canvas, deck)
                 self._draw_bases(canvas, deck)
                 if deck_layout and self.config.deck_area:
@@ -181,6 +184,32 @@ class Renderer:
                 break
             self._draw_special_card(canvas, base, areas[i])
 
+    def _draw_image_areas(self, canvas):
+        """Render image_areas: load each image and fit within its area, preserving aspect ratio."""
+        for entry in self.config.image_areas or []:
+            area = entry.get("area")
+            image_path = entry.get("image")
+            if not area or not image_path:
+                continue
+            x0, y0, x1, y1 = area
+            area_width, area_height = x1 - x0, y1 - y0
+            if area_width <= 0 or area_height <= 0:
+                continue
+            try:
+                img = Image.open(image_path).convert("RGBA")
+                orig_w, orig_h = img.size
+                if orig_w <= 0 or orig_h <= 0:
+                    continue
+                scale = min(area_width / orig_w, area_height / orig_h)
+                new_w = int(orig_w * scale)
+                new_h = int(orig_h * scale)
+                img = img.resize((new_w, new_h), Image.LANCZOS)
+                paste_x = x0 + (area_width - new_w) // 2
+                paste_y = y0 + (area_height - new_h) // 2
+                canvas.alpha_composite(img, (paste_x, paste_y))
+            except Exception as e:
+                print(f"Failed to load image area {image_path}: {e}")
+
     def _draw_special_card(self, canvas, card, area):
         """Load and composite a single card (leader/base) into an area, preserving aspect ratio."""
         x0, y0, x1, y1 = area
@@ -296,4 +325,4 @@ class Renderer:
 
     def _card_image_path(self, card):
         """Build the file path for a card image."""
-        return os.path.join("images", card.card_set, f"{card.card_number}.png")
+        return os.path.join(get_image_cache_dir(), card.card_set, f"{card.card_number}.png")

@@ -10,7 +10,8 @@ class Config:
         base_areas=None,
         deck_area=None,
         sb_area=None,
-        misc_area=None,
+        image_areas=None,
+        misc_areas=None,
         count_background=None,
         count_font=None,
         padding=3,
@@ -22,9 +23,10 @@ class Config:
         self.base_areas = base_areas or []
         self.deck_area = deck_area
         self.sb_area = sb_area
-        self.misc_area = misc_area
+        self.image_areas = image_areas or []
+        self.misc_areas = misc_areas or []
         self.count_background = count_background
-        self.count_font = count_font  # Path to font file for count overlay
+        self.count_font = count_font
         self.padding = padding
         self.uniform_card_size = uniform_card_size
 
@@ -74,7 +76,8 @@ class Config:
             base_areas=data.get("base_areas"),
             deck_area=data.get("deck_area"),
             sb_area=data.get("sb_area"),
-            misc_area=data.get("misc_area"),
+            image_areas=data.get("image_areas"),
+            misc_areas=data.get("misc_areas"),
             count_background=data.get("count_background"),
             count_font=data.get("count_font"),
             padding=data.get("padding", 3),
