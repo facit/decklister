@@ -37,11 +37,28 @@ except ImportError:
 API_BASE = "https://admin.starwarsunlimited.com/api"
 CARD_LIST_ENDPOINT = f"{API_BASE}/card-list"
 
+# requests' default ("python-requests/X.Y") is a well-known bot signature that
+# CDN/WAF layers commonly block outright, independent of anything we're doing
+# — so a realistic browser UA is worth sending on every request, not just the
+# admin API's own Origin/Referer check.
+USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+              "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+
 # The official API rejects requests without an Origin/Referer it recognizes.
 API_HEADERS = {
     "Accept": "application/json",
     "Origin": "https://starwarsunlimited.com",
     "Referer": "https://starwarsunlimited.com/",
+    "User-Agent": USER_AGENT,
+}
+
+# For the CDN itself (probes and full downloads) rather than the JSON API —
+# "Accept: application/json" on an image request is itself a mismatch a bot
+# filter can key on, so this asks for images the way a real browser would.
+CDN_HEADERS = {
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+    "Referer": "https://starwarsunlimited.com/",
+    "User-Agent": USER_AGENT,
 }
 
 MAX_WORKERS = 8          # concurrent image downloads
@@ -145,6 +162,52 @@ def _rate_limit_download(url):
             _cdn_download_limiter.wait()
     except ValueError:
         pass
+
+
+# A 403 from this CDN means "you are being blocked" (bot/rate-limit
+# protection), not "this file doesn't exist" — that's a 404. Seeing several
+# in a row means our own traffic likely triggered it, and the correct
+# response is to stop immediately, not keep retrying into more of the same
+# block. CDN_FORBIDDEN_TRIP_THRESHOLD consecutive 403s (across every thread,
+# probes and downloads alike) trips a breaker that short-circuits every
+# further CDN request for the rest of this run.
+CDN_FORBIDDEN_TRIP_THRESHOLD = 5
+
+_cdn_breaker_lock = threading.Lock()
+_cdn_consecutive_forbidden = 0
+_cdn_breaker_tripped = False
+
+
+class CDNBlocked(Exception):
+    """The CDN appears to be actively blocking us (repeated 403 Forbidden)."""
+
+
+def _check_cdn_breaker():
+    if _cdn_breaker_tripped:
+        raise CDNBlocked(
+            "the CDN returned 403 Forbidden repeatedly earlier in this run — "
+            "it looks like our requests are being blocked, not that assets "
+            "are missing. Stopping instead of continuing to hammer it. Wait "
+            "a while before retrying; consider lowering "
+            "CDN_PROBE_REQUESTS_PER_SECOND / CDN_DOWNLOAD_REQUESTS_PER_SECOND "
+            "if it keeps happening."
+        )
+
+
+def _record_cdn_response(status_code):
+    """Update the consecutive-403 count from every thread's CDN response;
+    trip the breaker once it crosses the threshold."""
+    global _cdn_consecutive_forbidden, _cdn_breaker_tripped
+    with _cdn_breaker_lock:
+        if status_code == 403:
+            _cdn_consecutive_forbidden += 1
+            if _cdn_consecutive_forbidden >= CDN_FORBIDDEN_TRIP_THRESHOLD and not _cdn_breaker_tripped:
+                _cdn_breaker_tripped = True
+                print(f"\n  ! Got {_cdn_consecutive_forbidden} consecutive 403 Forbidden "
+                      f"responses from the CDN — it looks like we're being blocked, not "
+                      f"that assets are missing. Stopping further CDN requests.\n")
+        else:
+            _cdn_consecutive_forbidden = 0
 
 
 # Directory overrides. Precedence: explicit set_images_dir() call > environment
@@ -397,18 +460,27 @@ def _probe_dimensions(session, url, dim_cache):
     if cached is not None:
         return tuple(cached)
 
+    _check_cdn_breaker()
     _rate_limit_probe(url)
     try:
-        resp = session.get(url, headers={"Range": "bytes=0-23"}, timeout=REQUEST_TIMEOUT)
+        # Explicit CDN_HEADERS, not the session's own (Accept: application/json
+        # is right for the admin API but wrong — and a bot-filter tell — for
+        # an actual image request).
+        resp = session.get(url, headers={**CDN_HEADERS, "Range": "bytes=0-23"}, timeout=REQUEST_TIMEOUT)
+        _record_cdn_response(resp.status_code)
         if resp.status_code not in (200, 206):
             return None
         dims = _png_dimensions_from_header(resp.content)
         if dims is None:
+            _check_cdn_breaker()
             _rate_limit_download(url)   # full fallback fetch — real bandwidth this time
-            full = session.get(url, timeout=REQUEST_TIMEOUT)
+            full = session.get(url, headers=CDN_HEADERS, timeout=REQUEST_TIMEOUT)
+            _record_cdn_response(full.status_code)
             full.raise_for_status()
             with Image.open(BytesIO(full.content)) as im:
                 dims = im.size
+    except CDNBlocked:
+        raise
     except Exception as e:
         print(f"  Warning: could not measure {url}: {e}")
         return None
@@ -1174,6 +1246,21 @@ def check_for_new_cards(update=False, download=False, report=True, sample=10,
     return diff
 
 
+def _drain_download_futures(futures, describe):
+    """Consume as_completed(futures) from a download batch, printing each
+    failure — except CDNBlocked, which means the CDN itself is blocking us:
+    print that once and stop waiting on the rest, rather than repeating the
+    same failure for every other card still in flight."""
+    for future in as_completed(futures):
+        try:
+            future.result()
+        except CDNBlocked as e:
+            print(f"\n  Stopping: {e}")
+            break
+        except Exception as e:
+            print(f"Error downloading {describe(future)}: {e}")
+
+
 def download_manifest_keys(keys, manifest, refresh=False):
     """Download images for explicit "SET/STEM" manifest keys.
 
@@ -1205,11 +1292,7 @@ def download_manifest_keys(keys, manifest, refresh=False):
             futures[executor.submit(
                 download_card, card_set, stem,
                 os.path.join(_images_dir(), card_set), manifest)] = key
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error downloading {futures[future]}: {e}")
+        _drain_download_futures(futures, lambda f: futures[f])
 
 
 def download_card(card_set, card_number, output_dir, manifest=None):
@@ -1243,13 +1326,17 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     if not os.path.isfile(front_path):
         print(f"Downloading {card_set} #{stem}...")
         try:
+            _check_cdn_breaker()
             _rate_limit_download(entry["front"])
-            resp = requests.get(entry["front"], headers=API_HEADERS,
+            resp = requests.get(entry["front"], headers=CDN_HEADERS,
                                 allow_redirects=True, timeout=30)
+            _record_cdn_response(resp.status_code)
             resp.raise_for_status()
             with open(front_path, "wb") as f:
                 f.write(resp.content)
             result = 1
+        except CDNBlocked:
+            raise
         except Exception as e:
             print(f"Failed to download {card_set} #{stem}: {e}")
             return -1
@@ -1258,12 +1345,16 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     # gives back art to in the future).
     if back_url and not os.path.isfile(back_path):
         try:
+            _check_cdn_breaker()
             _rate_limit_download(back_url)
-            resp = requests.get(back_url, headers=API_HEADERS,
+            resp = requests.get(back_url, headers=CDN_HEADERS,
                                 allow_redirects=True, timeout=30)
+            _record_cdn_response(resp.status_code)
             resp.raise_for_status()
             with open(back_path, "wb") as f:
                 f.write(resp.content)
+        except CDNBlocked:
+            raise
         except Exception as e:
             print(f"Failed to download back of {card_set} #{stem}: {e}")
 
@@ -1313,12 +1404,7 @@ def download_images_batch(cards):
             ): (card_set, card_number)
             for card_set, card_number in to_download
         }
-        for future in as_completed(futures):
-            card_set, card_number = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error downloading {card_set} #{card_number}: {e}")
+        _drain_download_futures(futures, lambda f: "{} #{}".format(*futures[f]))
 
 
 def download_images(card_set, card_number=None):
@@ -1352,16 +1438,12 @@ def download_images(card_set, card_number=None):
 
     print(f"Downloading {len(set_keys)} card(s) for {card_set}...")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [
+        futures = {
             executor.submit(download_card, card_set,
-                            key.split("/", 1)[1], output_dir, manifest)
+                            key.split("/", 1)[1], output_dir, manifest): key
             for key in set_keys
-        ]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error: {e}")
+        }
+        _drain_download_futures(futures, lambda f: futures[f])
 
 
 def download_all_images():
@@ -1389,12 +1471,7 @@ def download_all_images():
             output_dir = os.path.join(_images_dir(), card_set)
             futures[executor.submit(download_card, card_set, stem,
                                     output_dir, manifest)] = key
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                future.result()
-            except Exception as e:
-                print(f"Error downloading {key}: {e}")
+        _drain_download_futures(futures, lambda f: futures[f])
     print("Done.")
 
 
@@ -1443,20 +1520,28 @@ if __name__ == "__main__":
     DOWNLOAD_FLAGS = {"--download", "-d"}
     HISTORY_VERBS = {"--history", "--log"}
 
-    if args and args[0] in HISTORY_VERBS:
-        limit = next((int(a) for a in positional if a.isdigit()), 5)
-        show_change_history(limit=limit,
-                            detail="--detail" in flags or "-v" in flags)
-    # --update / --download imply the check, so `--download` on its own works.
-    elif args and args[0] in CHECK_VERBS | UPDATE_FLAGS | DOWNLOAD_FLAGS:
-        check_for_new_cards(update=bool(flags & UPDATE_FLAGS),
-                            download=bool(flags & DOWNLOAD_FLAGS))
-    elif args and args[0] in ("--all", "-a", "all"):
-        download_all_images()
-    elif positional:
-        download_images(positional[0],
-                        positional[1] if len(positional) > 1 else None)
-    else:
+    show_usage = False
+    try:
+        if args and args[0] in HISTORY_VERBS:
+            limit = next((int(a) for a in positional if a.isdigit()), 5)
+            show_change_history(limit=limit,
+                                detail="--detail" in flags or "-v" in flags)
+        # --update / --download imply the check, so `--download` on its own works.
+        elif args and args[0] in CHECK_VERBS | UPDATE_FLAGS | DOWNLOAD_FLAGS:
+            check_for_new_cards(update=bool(flags & UPDATE_FLAGS),
+                                download=bool(flags & DOWNLOAD_FLAGS))
+        elif args and args[0] in ("--all", "-a", "all"):
+            download_all_images()
+        elif positional:
+            download_images(positional[0],
+                            positional[1] if len(positional) > 1 else None)
+        else:
+            show_usage = True
+    except CDNBlocked as e:
+        print(f"\nStopped: {e}")
+        sys.exit(1)
+
+    if show_usage:
         print("Usage:")
         print("  python swuscan_manifest.py <card_set> [<card_number>]")
         print("  python swuscan_manifest.py --all")
