@@ -285,7 +285,18 @@ def _normalize_cdn_url(url):
 
 
 def _looks_like_image_url(value):
+    """A real URL/path, not a bare filename.
+
+    Strapi media objects carry both a "name" (the original uploaded
+    filename, e.g. "xxsmall_SWH01_005_Luke Skywalker_Thumbnail.png" — no
+    host, no path, nothing to fetch) and a "url" (the actual servable
+    path). Both end in an image extension, so the extension check alone
+    can't tell them apart; requiring a "/" does, since every real URL or
+    relative path has at least one and a bare filename never does.
+    """
     path = value.split("?", 1)[0].split("#", 1)[0]
+    if "/" not in path:
+        return False
     return path.lower().endswith(IMAGE_EXTENSIONS)
 
 
