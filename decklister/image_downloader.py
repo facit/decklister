@@ -551,35 +551,40 @@ def _get_with_retries(session, url, **kwargs):
     raise last_err
 
 
-def _report_page_progress(page, total_pages, card_count, start_time):
-    """Show that the page-fetch loop is still alive.
+def _report_progress(processed, total, start_time):
+    """Show that card processing is still alive.
 
-    Each page is one HTTP round trip (up to REQUEST_TIMEOUT seconds, more with
-    retries) and there can be hundreds of them, so the loop used to go silent
-    for minutes. On a terminal this redraws a single progress line; piped or
-    redirected output instead gets an occasional plain line, so a log file
-    doesn't fill up with hundreds of near-duplicate rows.
+    Tracked per CARD, not per page: each card can trigger several
+    rate-limited CDN probe requests (see _extract_card_art), so a single
+    page's processing time now varies a lot — a page of leaders can take
+    far longer than a page of ordinary units. Per-page granularity could
+    leave the terminal silent for a long stretch with no visible sign of
+    life; per-card granularity means something prints for every single
+    card, however fast or slow the page around it is.
+
+    On a terminal this redraws a single progress line; piped or redirected
+    output instead gets an occasional plain line, so a log file doesn't
+    fill up with thousands of near-duplicate rows.
     """
+    total = total or processed or 1
     elapsed = time.time() - start_time
-    rate = page / elapsed if elapsed > 0 else 0
-    eta = (total_pages - page) / rate if rate > 0 else 0
-    done = page >= total_pages
+    rate = processed / elapsed if elapsed > 0 else 0
+    eta = (total - processed) / rate if rate > 0 else 0
+    done = processed >= total
 
     if sys.stdout.isatty():
         width = 30
-        filled = int(width * page / total_pages) if total_pages else width
+        filled = min(width, int(width * processed / total)) if total else width
         bar = "#" * filled + "-" * (width - filled)
-        sys.stdout.write(f"\r  [{bar}] page {page}/{total_pages}  "
-                          f"{card_count} card(s)  eta {eta:.0f}s   ")
+        sys.stdout.write(f"\r  [{bar}] {processed}/{total} card(s)  eta {eta:.0f}s   ")
         sys.stdout.flush()
         if done:
             sys.stdout.write("\n")
             sys.stdout.flush()
     else:
-        step = max(1, total_pages // 20)   # ~20 updates over the whole run
-        if done or page % step == 0:
-            print(f"  page {page}/{total_pages}  {card_count} card(s)  "
-                  f"eta {eta:.0f}s")
+        step = max(1, total // 40)   # ~40 updates over the whole run
+        if done or processed % step == 0:
+            print(f"  {processed}/{total} card(s)  eta {eta:.0f}s")
 
 
 def _fetch_manifest_from_api():
@@ -608,6 +613,8 @@ def _fetch_manifest_from_api():
 
     page = 1
     total_pages = None
+    total_cards = None
+    processed = 0
     start_time = time.time()
     try:
         while True:
@@ -626,10 +633,14 @@ def _fetch_manifest_from_api():
             pagination = data.get("meta", {}).get("pagination", {})
             if total_pages is None:
                 total_pages = pagination.get("pageCount", 1)
+                total_cards = pagination.get("total") or (total_pages * PAGE_SIZE)
                 print(f"Building card manifest: {pagination.get('total', '?')} "
                       f"cards across {total_pages} page(s)...")
 
             for entry in data.get("data", []):
+                processed += 1
+                _report_progress(processed, total_cards, start_time)
+
                 attrs = entry.get("attributes", entry)  # v5 falls back to entry itself
                 number = attrs.get("cardNumber")
                 expansion = _unwrap(attrs.get("expansion"))
@@ -665,8 +676,6 @@ def _fetch_manifest_from_api():
                     "is_variant": bool(_unwrap(attrs.get("variantOf"))),
                     "card_count": attrs.get("cardCount"),    # the printed "/M"; identifies the logical set
                 })
-
-            _report_page_progress(page, total_pages, len(collected), start_time)
 
             if page % 20 == 0:
                 _save_dimension_cache(dim_cache)   # checkpoint — this build can take a while
