@@ -1,12 +1,18 @@
 import os
+import re
 import sys
 import json
 import time
 import shutil
 import tempfile
+import threading
 import requests
+from io import BytesIO
 from collections import Counter, defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from urllib.parse import urlsplit, parse_qs, unquote
+
+from PIL import Image
 
 try:
     from .app_paths import get_image_cache_dir            # normal: imported as a package module
@@ -46,6 +52,74 @@ PLACEHOLDER_BACK_THRESHOLD = 5
 # card numbering (so a token and a leader can both be "#1" in the same set).
 # We prefix token stems with this so they never collide on key or filename.
 TOKEN_PREFIX = "T"
+
+# --------------------------------------------------------------------------- #
+# Card art discovery.
+#
+# The public /cards page never downloads full-res art directly: images go
+# through Next's optimizer (/_next/image?url=<encoded>&w=...&q=...), which
+# downscales AND re-encodes as WebP regardless of the .png in the encoded
+# URL. The real asset lives on cdn.starwarsunlimited.com, which is
+# Strapi-backed: each upload gets a set of resized variants distinguished by
+# a filename prefix, all sharing one trailing "_<hash>.<ext>". The prefixes
+# in use (xxxsmall_/xxsmall_/thumbnail_/xsmall_/card_/small_/medium_, and no
+# prefix for the original) aren't hardcoded anywhere below — variants are
+# grouped purely by that trailing hash and the largest is picked by MEASURED
+# pixel area, since file size doesn't reliably track resolution here (a more
+# heavily-compressed original can be smaller than a resized-but-less-
+# compressed "card" variant of nearly the same dimensions).
+CDN_HOSTNAME = "cdn.starwarsunlimited.com"
+NEXT_IMAGE_SUFFIX = "/_next/image"
+IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")
+HASH_SUFFIX_RE = re.compile(r"_([0-9a-fA-F]{6,})\.(png|jpe?g|webp)$", re.IGNORECASE)
+
+# Strapi format-name prefixes to drop outright rather than measure: "icon_"
+# variants are unrelated UI badges (aspect/keyword/rarity icons, etc.), and
+# leaders' "..._Leader_Unit_Thumbnail_..." asset is a 300x100 deck-list
+# strip — never a candidate for "the" front or back face.
+ICON_PREFIX = "icon_"
+LEADER_UNIT_THUMBNAIL_MARKER = "leader_unit_thumbnail"
+LEADER_UNIT_MARKER = "leader_unit"   # deployed leader face -> back
+
+DIMENSION_CACHE_FILENAME = "image_dimensions_cache.json"   # url -> [width, height]
+
+# Requests/second shared across every thread hitting the CDN (dimension
+# probes AND full downloads) — this is someone else's infrastructure, not
+# ours, so concurrency (MAX_WORKERS) must not translate into a burst.
+CDN_REQUESTS_PER_SECOND = 20
+
+
+class _RateLimiter:
+    """Thread-safe pacing so every thread's CDN requests share ONE combined
+    budget, not one budget each. Without this, MAX_WORKERS concurrent
+    threads would each independently hammer the CDN at full speed."""
+
+    def __init__(self, requests_per_second):
+        self._interval = 1.0 / requests_per_second if requests_per_second > 0 else 0.0
+        self._lock = threading.Lock()
+        self._next_slot = 0.0
+
+    def wait(self):
+        if self._interval <= 0:
+            return
+        with self._lock:
+            now = time.monotonic()
+            delay = self._next_slot - now
+            self._next_slot = max(now, self._next_slot) + self._interval
+        if delay > 0:
+            time.sleep(delay)
+
+
+_cdn_limiter = _RateLimiter(CDN_REQUESTS_PER_SECOND)
+
+
+def _rate_limit_for(url):
+    """Pace this request if (and only if) it's headed at the CDN."""
+    try:
+        if urlsplit(url).hostname == CDN_HOSTNAME:
+            _cdn_limiter.wait()
+    except ValueError:
+        pass
 
 
 # Directory overrides. Precedence: explicit set_images_dir() call > environment
@@ -128,6 +202,41 @@ def _load_set_settings():
         return {}
 
 
+def _dimension_cache_path():
+    return os.path.join(_manifest_dir(), DIMENSION_CACHE_FILENAME)
+
+
+def _load_dimension_cache():
+    """url -> [width, height], so a manifest rebuild never re-probes an
+    asset it already measured (on this machine or a prior run)."""
+    try:
+        with open(_dimension_cache_path(), "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_dimension_cache(cache):
+    """Best-effort atomic write; a failure here shouldn't abort the build,
+    it just means the next run re-probes what this one already measured."""
+    directory = _manifest_dir()
+    tmp_path = None
+    try:
+        os.makedirs(directory, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=directory, prefix=".image_dims-", suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(cache, f)
+        os.replace(tmp_path, _dimension_cache_path())
+    except OSError as e:
+        print(f"Warning: could not save image-dimension cache: {e}")
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+
+
 def _norm_number(card_number):
     """Match the existing filename convention: zero-pad numeric IDs to 3 digits.
     Non-numeric stems (e.g. an already-prefixed 'T001') pass through unchanged."""
@@ -155,15 +264,164 @@ def _unwrap(node):
     return node.get("attributes", node) or {}
 
 
-def _art_url(node):
-    """Resolve a media relation to its 'card'-format URL (falling back to the
-    original)."""
-    node = _unwrap(node)
-    if not node:
+def _unwrap_next_image_url(url):
+    """/cards renders art through Next's image optimizer
+    (/_next/image?url=<percent-encoded>&w=...&q=...), which downscales AND
+    re-encodes as WebP regardless of the extension in the encoded URL. If
+    this is one of those, return the real CDN URL underneath; otherwise
+    return the URL unchanged."""
+    parsed = urlsplit(url)
+    if not parsed.path.endswith(NEXT_IMAGE_SUFFIX):
+        return url
+    inner = parse_qs(parsed.query).get("url", [None])[0]
+    return unquote(inner) if inner else url
+
+
+def _normalize_cdn_url(url):
+    """Collapse a doubled slash right after the host (some CDN URLs in the
+    API response have one) so the same image doesn't produce two different
+    cache keys / manifest entries."""
+    return re.sub(r"^(https?://[^/]+)/+", r"\1/", url)
+
+
+def _looks_like_image_url(value):
+    path = value.split("?", 1)[0].split("#", 1)[0]
+    return path.lower().endswith(IMAGE_EXTENSIONS)
+
+
+def _iter_image_urls(node):
+    """Recursively yield every image URL found anywhere inside `node`.
+
+    Deliberately schema-agnostic: rather than trusting specific field names
+    (artFront/artBack) or a hardcoded list of Strapi format names, this
+    walks the WHOLE record and lets filename patterns (hash suffix, role
+    markers) do the sorting downstream. That's what survives a JSON shape
+    we haven't fully mapped, or fields the admin API adds/renames later.
+    """
+    if isinstance(node, dict):
+        for v in node.values():
+            yield from _iter_image_urls(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _iter_image_urls(v)
+    elif isinstance(node, str):
+        resolved = _normalize_cdn_url(_absolute(_unwrap_next_image_url(node)))
+        if _looks_like_image_url(resolved):
+            yield resolved
+
+
+def _is_excluded_candidate(url):
+    """Drop UI-badge icons and the leader deck-list thumbnail strip — never
+    real candidates for a card's front or back face art."""
+    name = os.path.basename(urlsplit(url).path).lower()
+    return name.startswith(ICON_PREFIX) or LEADER_UNIT_THUMBNAIL_MARKER in name
+
+
+def _group_candidates_by_hash(urls):
+    """Group same-image size variants by their shared trailing
+    "_<hash>.<ext>" rather than by any assumed prefix list — a URL with no
+    recognizable hash suffix just becomes its own singleton group."""
+    groups = defaultdict(list)
+    for url in urls:
+        m = HASH_SUFFIX_RE.search(url)
+        key = m.group(1).lower() if m else url
+        groups[key].append(url)
+    return groups
+
+
+def _png_dimensions_from_header(data):
+    """Parse width/height from a PNG's IHDR chunk (bytes 16:24 of the
+    file). Returns None if `data` isn't recognizably a PNG — the caller
+    falls back to a full download for anything else (WebP/JPEG)."""
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
         return None
-    card_fmt = (node.get("formats") or {}).get("card") or {}
-    # Prefer the resized "card" format; swap these if you want full-res art.
-    return _absolute(card_fmt.get("url") or node.get("url"))
+    width = int.from_bytes(data[16:20], "big")
+    height = int.from_bytes(data[20:24], "big")
+    return (width, height)
+
+
+def _probe_dimensions(session, url, dim_cache):
+    """Measure an image's pixel dimensions without downloading it in full.
+
+    A 24-byte Range request is enough for a PNG (see _png_dimensions_from_header);
+    that covers every asset on this CDN in practice, so the full-download
+    fallback (via Pillow) only exists for a format that never showed up in
+    what we've seen. Results are cached on disk by URL so a repeat manifest
+    build never re-probes the same asset, and every CDN hit — probe or full
+    download alike — goes through the shared rate limiter.
+    """
+    cached = dim_cache.get(url)
+    if cached is not None:
+        return tuple(cached)
+
+    _rate_limit_for(url)
+    try:
+        resp = session.get(url, headers={"Range": "bytes=0-23"}, timeout=REQUEST_TIMEOUT)
+        if resp.status_code not in (200, 206):
+            return None
+        dims = _png_dimensions_from_header(resp.content)
+        if dims is None:
+            _rate_limit_for(url)
+            full = session.get(url, timeout=REQUEST_TIMEOUT)
+            full.raise_for_status()
+            with Image.open(BytesIO(full.content)) as im:
+                dims = im.size
+    except Exception as e:
+        print(f"  Warning: could not measure {url}: {e}")
+        return None
+
+    dim_cache[url] = list(dims)
+    return dims
+
+
+def _pick_best_in_group(session, urls, dim_cache):
+    """From same-hash size variants of one image, return the (url, dims)
+    with the largest MEASURED pixel area. Never infers "the original" from
+    an absence of known prefix — file size doesn't reliably track
+    resolution here, so every candidate gets measured."""
+    best_url, best_dims, best_area = None, None, -1
+    for url in urls:
+        dims = _probe_dimensions(session, url, dim_cache)
+        if dims is None:
+            continue
+        area = dims[0] * dims[1]
+        if area > best_area:
+            best_url, best_dims, best_area = url, dims, area
+    if best_url is None:
+        # Every probe failed (network hiccup, unrecognized format) — keep
+        # some URL rather than dropping the card's art entirely.
+        best_url = urls[0]
+    return best_url, best_dims
+
+
+def _extract_card_art(attrs, session, dim_cache):
+    """Find this card's front/back art by scanning its ENTIRE record for
+    image URLs — not specific fields, not a known format-prefix list.
+    Same-hash size variants are grouped and reduced to the largest by
+    measured pixel area; role (front vs. back) comes from the
+    "..._Leader_Unit_..." filename marker (the deployed/back face),
+    defaulting to front otherwise — the only signal that survives
+    regardless of how the surrounding JSON happens to be shaped.
+
+    Returns (front_url, front_dims, back_url, back_dims); any of these can
+    be None (no front means no usable art at all for this card).
+    """
+    candidates = {u for u in _iter_image_urls(attrs) if not _is_excluded_candidate(u)}
+    if not candidates:
+        return None, None, None, None
+
+    best = {"front": (None, None, -1), "back": (None, None, -1)}
+    for urls in _group_candidates_by_hash(candidates).values():
+        url, dims = _pick_best_in_group(session, urls, dim_cache)
+        area = (dims[0] * dims[1]) if dims else 0
+        name = os.path.basename(urlsplit(url).path).lower()
+        role = "back" if LEADER_UNIT_MARKER in name else "front"
+        if area > best[role][2]:
+            best[role] = (url, dims, area)
+
+    front_url, front_dims, _ = best["front"]
+    back_url, back_dims, _ = best["back"]
+    return front_url, front_dims, back_url, back_dims
 
 
 def _card_type(attributes):
@@ -315,82 +573,98 @@ def _report_page_progress(page, total_pages, card_count, start_time):
 
 def _fetch_manifest_from_api():
     """Page through the official card-list API and build a lookup of
-    "SET/STEM" -> {"front", "back", "type", "serial", "double_sided"}.
+    "SET/STEM" -> {"front", "back", "width", "height", "type", "serial",
+    "double_sided"}.
 
     Tokens get a "T"-prefixed stem so their overlapping 1,2,3 numbering doesn't
     collide with leaders/cards of the same number. Double-sidedness is decided
     by back-art presence (the same signal the official UI uses to allow a flip),
     so leaders today and any future double-sided type are picked up automatically.
+
+    Front/back art is the largest MEASURED variant found anywhere in each
+    card's record (see _extract_card_art) — not a guess based on field names
+    or a known Strapi format list. Dimension probes are cached to disk
+    (dim_cache) and persisted periodically, so an interrupted build doesn't
+    lose that work, and a rebuild never re-probes an asset it already
+    measured.
     """
     collected = []          # one record per kept card, before key disambiguation
     back_counts = Counter()
     set_settings = _load_set_settings()
     session = requests.Session()
     session.headers.update(API_HEADERS)
+    dim_cache = _load_dimension_cache()
 
     page = 1
     total_pages = None
     start_time = time.time()
-    while True:
-        params = {
-            "locale": "en",
-            "pagination[page]": page,
-            "pagination[pageSize]": PAGE_SIZE,
-            "populate": "*",
-        }
-        if not INCLUDE_VARIANTS:
-            # Restrict to base cards only (drops hyperspace/showcase printings).
-            params["filters[variantOf][id][$null]"] = "true"
-        resp = _get_with_retries(session, CARD_LIST_ENDPOINT, params=params)
-        data = resp.json()
+    try:
+        while True:
+            params = {
+                "locale": "en",
+                "pagination[page]": page,
+                "pagination[pageSize]": PAGE_SIZE,
+                "populate": "*",
+            }
+            if not INCLUDE_VARIANTS:
+                # Restrict to base cards only (drops hyperspace/showcase printings).
+                params["filters[variantOf][id][$null]"] = "true"
+            resp = _get_with_retries(session, CARD_LIST_ENDPOINT, params=params)
+            data = resp.json()
 
-        pagination = data.get("meta", {}).get("pagination", {})
-        if total_pages is None:
-            total_pages = pagination.get("pageCount", 1)
-            print(f"Building card manifest: {pagination.get('total', '?')} "
-                  f"cards across {total_pages} page(s)...")
+            pagination = data.get("meta", {}).get("pagination", {})
+            if total_pages is None:
+                total_pages = pagination.get("pageCount", 1)
+                print(f"Building card manifest: {pagination.get('total', '?')} "
+                      f"cards across {total_pages} page(s)...")
 
-        for entry in data.get("data", []):
-            attrs = entry.get("attributes", entry)  # v5 falls back to entry itself
-            number = attrs.get("cardNumber")
-            expansion = _unwrap(attrs.get("expansion"))
-            set_code = expansion.get("code")
-            if not set_code or number is None:
-                continue
+            for entry in data.get("data", []):
+                attrs = entry.get("attributes", entry)  # v5 falls back to entry itself
+                number = attrs.get("cardNumber")
+                expansion = _unwrap(attrs.get("expansion"))
+                set_code = expansion.get("code")
+                if not set_code or number is None:
+                    continue
 
-            front = _art_url(attrs.get("artFront"))
-            if not front:
-                continue
-            back = _art_url(attrs.get("artBack"))
-            if back and back != front:           # ignore a back that just echoes the front
-                back_counts[back] += 1
-            else:
-                back = None
+                front, front_dims, back, back_dims = _extract_card_art(attrs, session, dim_cache)
+                if not front:
+                    continue
+                if back and back != front:           # ignore a back that just echoes the front
+                    back_counts[back] += 1
+                else:
+                    back, back_dims = None, None
 
-            type_name = _card_type(attrs)
-            # Tokens live in a separate "T"-prefixed namespace.
-            stem = _norm_number(number)
-            if _is_token(type_name):
-                stem = f"{TOKEN_PREFIX}{stem}"
+                type_name = _card_type(attrs)
+                # Tokens live in a separate "T"-prefixed namespace.
+                stem = _norm_number(number)
+                if _is_token(type_name):
+                    stem = f"{TOKEN_PREFIX}{stem}"
 
-            collected.append({
-                "attrs": attrs,
-                "set_code": set_code,
-                "stem": stem,
-                "front": front,
-                "back": back,
-                "type": type_name,
-                "serial": attrs.get("serialCode"),
-                # variantOf is set on hyperspace/showcase/reprint records, null on base cards.
-                "is_variant": bool(_unwrap(attrs.get("variantOf"))),
-                "card_count": attrs.get("cardCount"),    # the printed "/M"; identifies the logical set
-            })
+                collected.append({
+                    "attrs": attrs,
+                    "set_code": set_code,
+                    "stem": stem,
+                    "front": front,
+                    "back": back,
+                    "front_dims": front_dims,
+                    "back_dims": back_dims,
+                    "type": type_name,
+                    "serial": attrs.get("serialCode"),
+                    # variantOf is set on hyperspace/showcase/reprint records, null on base cards.
+                    "is_variant": bool(_unwrap(attrs.get("variantOf"))),
+                    "card_count": attrs.get("cardCount"),    # the printed "/M"; identifies the logical set
+                })
 
-        _report_page_progress(page, total_pages, len(collected), start_time)
+            _report_page_progress(page, total_pages, len(collected), start_time)
 
-        if page >= total_pages:
-            break
-        page += 1
+            if page % 20 == 0:
+                _save_dimension_cache(dim_cache)   # checkpoint — this build can take a while
+
+            if page >= total_pages:
+                break
+            page += 1
+    finally:
+        _save_dimension_cache(dim_cache)   # keep whatever we measured even on an early exit
 
     return _build_manifest(collected, back_counts, set_settings)
 
@@ -444,9 +718,15 @@ def _build_manifest(collected, back_counts, set_settings):
             else:
                 continue
 
+        front_w, front_h = c["front_dims"] or (None, None)
+        back_w, back_h = c["back_dims"] or (None, None)
         raw[key] = {
             "front": c["front"],
             "back": c["back"],
+            "width": front_w,
+            "height": front_h,
+            "back_width": back_w,
+            "back_height": back_h,
             "type": c["type"],
             "serial": c["serial"],
             "_variant": c["is_variant"],
@@ -468,6 +748,9 @@ def _build_manifest(collected, back_counts, set_settings):
         rec.pop("_variant", None)             # internal-only flag, not part of the manifest
         rec["back"] = back
         rec["double_sided"] = back is not None
+        if back is None:
+            rec["back_width"] = None
+            rec["back_height"] = None
         manifest[key] = rec
     return manifest
 
@@ -555,7 +838,10 @@ def get_card_manifest(force_refresh=False):
 
 # Fields whose change invalidates already-downloaded artwork. "double_sided" is
 # derived from "back", so it lives here too rather than showing up as metadata noise.
-ART_FIELDS = ("front", "back", "double_sided")
+# width/height/back_width/back_height are derived from front/back too, but track
+# them explicitly since a re-measurement (bugfix, new Strapi variant) can change
+# the chosen resolution without the URL itself changing.
+ART_FIELDS = ("front", "back", "double_sided", "width", "height", "back_width", "back_height")
 
 # Order isn't meaningful for these, so compare them as sets to avoid phantom diffs
 # when the API returns the same related records in a different order.
@@ -881,6 +1167,7 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     if not os.path.isfile(front_path):
         print(f"Downloading {card_set} #{stem}...")
         try:
+            _rate_limit_for(entry["front"])
             resp = requests.get(entry["front"], headers=API_HEADERS,
                                 allow_redirects=True, timeout=30)
             resp.raise_for_status()
@@ -895,6 +1182,7 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     # gives back art to in the future).
     if back_url and not os.path.isfile(back_path):
         try:
+            _rate_limit_for(back_url)
             resp = requests.get(back_url, headers=API_HEADERS,
                                 allow_redirects=True, timeout=30)
             resp.raise_for_status()
