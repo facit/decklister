@@ -139,6 +139,10 @@ class DeckListerGUI(QMainWindow):
         self.showcase_check.setToolTip("Use showcase variant art for leader cards (overrides hyperspace for leaders)")
         options_layout.addWidget(self.showcase_check)
 
+        self.card_names_check = QCheckBox("Show card names")
+        self.card_names_check.setToolTip("Display card names next to each card (fetched from swudb.com)")
+        options_layout.addWidget(self.card_names_check)
+
         options_layout.addStretch()
         layout.addWidget(options_group)
 
@@ -253,6 +257,10 @@ class DeckListerGUI(QMainWindow):
         if showcase:
             self._append_log("  Variant: Showcase leaders")
 
+        show_card_names = self.card_names_check.isChecked()
+        if show_card_names:
+            self._append_log("  Card names: enabled")
+
         # CSV-specific options
         player = None
         deck_index = 0
@@ -277,12 +285,12 @@ class DeckListerGUI(QMainWindow):
         # Run in a thread to keep the GUI responsive
         thread = threading.Thread(
             target=self._run_generator,
-            args=(deck_file, config_file, output_file, output_dir, hyperspace, showcase, player, deck_index, generate_all),
+            args=(deck_file, config_file, output_file, output_dir, hyperspace, showcase, show_card_names, player, deck_index, generate_all),
             daemon=True,
         )
         thread.start()
 
-    def _run_generator(self, deck_file, config_file, output_file, output_dir, hyperspace, showcase, player, deck_index, generate_all):
+    def _run_generator(self, deck_file, config_file, output_file, output_dir, hyperspace, showcase, show_card_names, player, deck_index, generate_all):
         """Worker thread that runs the generator and streams log messages in real-time."""
 
         # Custom stream that emits each line to the GUI as it's written
@@ -307,7 +315,7 @@ class DeckListerGUI(QMainWindow):
 
         try:
             config = Config.from_file(config_file)
-            generator = DeckImageGenerator(config=config, hyperspace=hyperspace, showcase=showcase)
+            generator = DeckImageGenerator(config=config, hyperspace=hyperspace, showcase=showcase, show_card_names=show_card_names)
 
             # Replace sys.stdout directly so all print() calls in this thread go to our stream
             old_stdout = sys.stdout

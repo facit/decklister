@@ -15,19 +15,21 @@ def main_cli():
     parser.add_argument("deck_file", help="Path to the deck file (.json or Melee.gg .csv)")
     parser.add_argument("config_file", help="Path to the config file")
     parser.add_argument("-o", "--output", help="Output file path (auto-named if not provided)", default=None)
+    parser.add_argument("-d", "--outdir", help="Output directory for generated images", default=None)
     parser.add_argument("--hyperspace", action="store_true", help="Use hyperspace variant art for all cards")
     parser.add_argument("--showcase", action="store_true", help="Use showcase variant art for leaders (overrides hyperspace for leaders)")
+    parser.add_argument("--card-names", action="store_true", help="Show card names next to each card")
     parser.add_argument("--player", default=None, help="(CSV only) Player name to select from a multi-deck CSV export")
     parser.add_argument("--index", type=int, default=0, help="(CSV only) 0-based deck index to select from a multi-deck CSV export (default: 0)")
     parser.add_argument("--all", action="store_true", help="(CSV only) Generate images for all decks in the CSV")
     args = parser.parse_args()
 
     config = Config.from_file(args.config_file)
-    generator = DeckImageGenerator(config=config, hyperspace=args.hyperspace, showcase=args.showcase)
+    generator = DeckImageGenerator(config=config, hyperspace=args.hyperspace, showcase=args.showcase, show_card_names=args.card_names)
     if args.all:
-        generator.run_all(args.deck_file, output_path=args.output)
+        generator.run_all(args.deck_file, output_path=args.output, output_dir=args.outdir)
     else:
-        generator.run(args.deck_file, output_path=args.output, player=args.player, deck_index=args.index)
+        generator.run(args.deck_file, output_path=args.output, output_dir=args.outdir, player=args.player, deck_index=args.index)
 
 
 def main_gui():

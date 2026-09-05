@@ -45,7 +45,12 @@ class Renderer:
             PIL Image (RGB) of the final composed deck image.
         """
         img_width, img_height = self.config.resolution
-        canvas = Image.new("RGBA", (img_width, img_height), (30, 30, 30, 255))
+
+        # Start transparent if transparent_background is enabled, else opaque dark
+        if getattr(self.config, "transparent_background", False):
+            canvas = Image.new("RGBA", (img_width, img_height), (0, 0, 0, 0))
+        else:
+            canvas = Image.new("RGBA", (img_width, img_height), (30, 30, 30, 255))
 
         for layer in self.config.layers:
             layer_type, layer_data = self._parse_layer(layer)
@@ -73,6 +78,9 @@ class Renderer:
                     text = meta.get(column, f"[{column}]")
                 self._draw_text_layer(canvas, layer_data, text=text)
 
+        # Keep alpha if transparent background requested, else flatten to RGB
+        if getattr(self.config, "transparent_background", False):
+            return canvas
         return canvas.convert("RGB")
 
     def _parse_layer(self, layer):
@@ -253,18 +261,121 @@ class Renderer:
         x0, y0, x1, y1 = area
         card_width, card_height, cols, rows, padding = layout
 
+        # Card name settings
+        cn = self.config.card_names
+        show_names = cn.get("enabled", False)
+        name_position = cn.get("position", "below")
+        name_size = cn.get("size", 14)
+        name_color = tuple(cn.get("color", [255, 255, 255]))
+        if len(name_color) == 3:
+            name_color = (*name_color, 255)
+
+        name_font = None
+        if show_names:
+            font_path = cn.get("font")
+            try:
+                name_font = ImageFont.truetype(font_path, name_size) if font_path else ImageFont.load_default(size=name_size)
+            except Exception:
+                try:
+                    name_font = ImageFont.truetype("arial.ttf", name_size)
+                except Exception:
+                    name_font = ImageFont.load_default()
+
+        # Calculate cell size (card + label space)
+        draw = ImageDraw.Draw(canvas)
+
+        # Calculate actual label dimensions from card names
+        label_height = 0
+        label_width = 0
+        if show_names and name_font:
+            if name_position in ("below", "above"):
+                max_h = 0
+                for card in cards:
+                    if card.name:
+                        bbox = draw.textbbox((0, 0), card.name, font=name_font)
+                        max_h = max(max_h, bbox[3] - bbox[1])
+                label_height = max_h + 6 if max_h else name_size + 4
+            elif name_position in ("left", "right"):
+                max_w = 0
+                for card in cards:
+                    if card.name:
+                        bbox = draw.textbbox((0, 0), card.name, font=name_font)
+                        max_w = max(max_w, bbox[2] - bbox[0])
+                label_width = max_w + 6 if max_w else name_size * 5
+
+        cell_width = card_width + label_width
+        cell_height = card_height + label_height
+
         for i, card in enumerate(cards):
             col = i % cols
             row = i // cols
-            x = x0 + col * (card_width + padding)
-            y = y0 + row * (card_height + padding)
+            cell_x = x0 + col * (cell_width + padding)
+            cell_y = y0 + row * (cell_height + padding)
+
+            # Determine card position within cell
+            if name_position == "above":
+                card_x = cell_x + label_width // 2
+                card_y = cell_y + label_height
+            elif name_position == "left":
+                card_x = cell_x + label_width
+                card_y = cell_y
+            else:  # below, right, overlay-top, overlay-bottom
+                card_x = cell_x
+                card_y = cell_y
 
             card_img = self._load_card_image(card, card_width, card_height)
-            card_img = self.count_overlay.apply(card_img, card.count)
+            if getattr(self.config, "show_counts", True):
+                card_img = self.count_overlay.apply(card_img, card.count)
 
             if card_img.mode != "RGBA":
                 card_img = card_img.convert("RGBA")
-            canvas.alpha_composite(card_img, (x, y))
+            canvas.alpha_composite(card_img, (card_x, card_y))
+
+            # Draw card name
+            if show_names and card.name and name_font:
+                self._draw_card_name(draw, card.name, card_x, card_y,
+                                     card_width, card_height, name_position,
+                                     name_font, name_color, label_height, label_width)
+
+    def _draw_card_name(self, draw, name, card_x, card_y, card_w, card_h,
+                        position, font, color, label_height, label_width):
+        """Draw a card name at the specified position relative to the card."""
+        # Use PIL's anchor parameter for precise alignment.
+        # Anchor codes: horizontal (l/m/r) + vertical (a/m/d = ascender/middle/descender)
+        if position == "below":
+            tx = card_x + card_w // 2
+            ty = card_y + card_h + 2
+            anchor = "ma"  # middle-ascender (top-centered)
+        elif position == "above":
+            tx = card_x + card_w // 2
+            ty = card_y - 2
+            anchor = "md"  # middle-descender (bottom-centered)
+        elif position == "left":
+            tx = card_x - 4
+            ty = card_y + card_h // 2
+            anchor = "rm"  # right-middle
+        elif position == "right":
+            tx = card_x + card_w + 4
+            ty = card_y + card_h // 2
+            anchor = "lm"  # left-middle
+        elif position == "overlay-top":
+            tx = card_x + card_w // 2
+            ty = card_y + 4
+            anchor = "ma"
+        elif position == "overlay-bottom":
+            tx = card_x + card_w // 2
+            ty = card_y + card_h - 4
+            anchor = "md"
+        else:
+            return
+
+        # Draw with outline for readability
+        for ox in range(-1, 2):
+            for oy in range(-1, 2):
+                if ox == 0 and oy == 0:
+                    continue
+                draw.text((tx + ox, ty + oy), name, font=font, fill=(0, 0, 0, 255), anchor=anchor)
+        draw.text((tx, ty), name, font=font, fill=color, anchor=anchor)
 
     def _load_card_image(self, card, width, height):
         """Load a card image, apply rounded corners at source resolution, then resize."""

@@ -5,6 +5,7 @@ try:
     from .card_sizer import CardSizer
     from .renderer import Renderer
     from .variant_resolver import resolve_variant
+    from .card_name_resolver import resolve_card_names
     from . import image_downloader as ImageDownloader
 except ImportError:
     from decklister.deck import Deck
@@ -12,6 +13,7 @@ except ImportError:
     from decklister.card_sizer import CardSizer
     from decklister.renderer import Renderer
     from decklister.variant_resolver import resolve_variant
+    from decklister.card_name_resolver import resolve_card_names
     from decklister import image_downloader as ImageDownloader
 
 
@@ -25,10 +27,11 @@ class DeckImageGenerator:
     5. Saves output
     """
 
-    def __init__(self, config=None, hyperspace=False, showcase=False):
+    def __init__(self, config=None, hyperspace=False, showcase=False, show_card_names=False):
         self.config = config or Config()
         self.hyperspace = hyperspace
         self.showcase = showcase
+        self.show_card_names = show_card_names
 
     def run(self, deck_file, output_path=None, output_dir=None, player=None, deck_index=0):
         """
@@ -37,7 +40,7 @@ class DeckImageGenerator:
         Args:
             deck_file: Path to the deck file (.json or Melee.gg .csv).
             output_path: Optional output file path. Auto-named if not provided.
-            output_dir: Optional output file dir. Current dir if not provided.
+            output_dir: Optional output directory. Created if it doesn't exist.
             player: (CSV only) Player name to select from a multi-deck CSV.
             deck_index: (CSV only) 0-based row index when player is not given.
         """
@@ -62,7 +65,7 @@ class DeckImageGenerator:
             print(f"Error loading deck: {e}")
             return
 
-        self._generate_image(deck, deck_file, output_path, output_dir, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
+        self._generate_image(deck, deck_file, output_path, output_dir=output_dir, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
 
     def run_all(self, deck_file, output_path=None, output_dir=None):
         """
@@ -71,7 +74,7 @@ class DeckImageGenerator:
         Args:
             deck_file: Path to a Melee.gg CSV file.
             output_path: Not used (each deck gets an auto-named output).
-            output_dir: Optional output file dir. Current dir if not provided.
+            output_dir: Optional output directory. Created if it doesn't exist.
         """
         if not deck_file:
             print("No deck file provided.")
@@ -115,7 +118,7 @@ class DeckImageGenerator:
             deck: Deck object.
             deck_file: Original input file path (for auto-naming).
             output_path: Optional explicit output path.
-            output_dir: Optional output file dir. Current dir if not provided.
+            output_dir: Optional output directory.
             player: Player name (for auto-naming).
             deck_index: Deck index (for auto-naming).
             is_multi_deck: Whether the source has multiple decks.
@@ -124,9 +127,59 @@ class DeckImageGenerator:
         self._apply_variants(deck)
         self._download_images(deck)
 
+        # Resolve card names if enabled (from config or CLI flag)
+        card_names_cfg = self.config.card_names
+        show_names = card_names_cfg.get("enabled", False) or self.show_card_names
+        if show_names:
+            all_cards = deck.leaders + deck.bases + deck.main_deck + deck.sideboard
+            show_subtitles = card_names_cfg.get("show_subtitles", True)
+            resolve_card_names(all_cards, show_subtitles=show_subtitles)
+
+        # Calculate label space for card names
+        label_height = 0
+        label_width = 0
+        if show_names:
+            position = card_names_cfg.get("position", "below")
+            name_size = card_names_cfg.get("size", 14)
+
+            if position in ("below", "above", "left", "right"):
+                # Load the actual font to measure text
+                from PIL import ImageFont
+                font_path = card_names_cfg.get("font")
+                try:
+                    font = ImageFont.truetype(font_path, name_size) if font_path else ImageFont.load_default(size=name_size)
+                except Exception:
+                    try:
+                        font = ImageFont.truetype("arial.ttf", name_size)
+                    except Exception:
+                        font = ImageFont.load_default()
+
+                # Measure actual card names
+                all_cards = deck.leaders + deck.bases + deck.main_deck + deck.sideboard
+                max_text_width = 0
+                max_text_height = 0
+                from PIL import ImageDraw, Image as PILImage
+                dummy = PILImage.new("RGBA", (1, 1))
+                draw = ImageDraw.Draw(dummy)
+                for card in all_cards:
+                    if card.name:
+                        bbox = draw.textbbox((0, 0), card.name, font=font)
+                        tw = bbox[2] - bbox[0]
+                        th = bbox[3] - bbox[1]
+                        max_text_width = max(max_text_width, tw)
+                        max_text_height = max(max_text_height, th)
+
+                margin = 6
+                if position in ("below", "above"):
+                    label_height = max_text_height + margin
+                elif position in ("left", "right"):
+                    label_width = max_text_width + margin
+
         # Calculate card sizes
-        deck_layout = self._calculate_layout(self.config.deck_area, len(deck.main_deck))
-        sb_layout = self._calculate_layout(self.config.sb_area, len(deck.sideboard))
+        deck_layout = self._calculate_layout(self.config.deck_area, len(deck.main_deck),
+                                              label_height=label_height, label_width=label_width)
+        sb_layout = self._calculate_layout(self.config.sb_area, len(deck.sideboard),
+                                            label_height=label_height, label_width=label_width)
 
         # If uniform sizing, use the smaller card size for both
         if self.config.uniform_card_size and deck_layout and sb_layout:
@@ -141,8 +194,9 @@ class DeckImageGenerator:
 
         # Save
         output_path = output_path or self._auto_output_name(deck_file, player=player, deck_index=deck_index, is_multi_deck=is_multi_deck)
-        if output_dir is not None:
-            output_path = os.path.join(output_dir, output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
+            output_path = os.path.join(output_dir, os.path.basename(output_path))
         image.save(output_path)
         print(f"Deck image saved as {output_path}")
 
@@ -165,11 +219,12 @@ class DeckImageGenerator:
             cards.append((card.card_set, card.card_number))
         ImageDownloader.download_images_batch(cards)
 
-    def _calculate_layout(self, area, card_count):
+    def _calculate_layout(self, area, card_count, label_height=0, label_width=0):
         """Calculate card layout for an area. Returns None if area or count is missing."""
         if area is None or card_count <= 0:
             return None
-        return CardSizer.calculate(area, card_count, padding=self.config.padding)
+        return CardSizer.calculate(area, card_count, padding=self.config.padding,
+                                   label_height=label_height, label_width=label_width)
 
     def _auto_output_name(self, deck_file, player=None, deck_index=0, is_multi_deck=False):
         """

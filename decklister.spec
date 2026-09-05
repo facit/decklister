@@ -46,6 +46,7 @@ a = Analysis(
         'decklister.variant_resolver',
         'decklister.melee_csv_parser',
         'decklister.config_drawer',
+        'decklister.card_name_resolver',
     ],
     hookspath=[],
     hooksconfig={},

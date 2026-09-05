@@ -8,6 +8,7 @@ class Card:
         self.card_set = card_set
         self.card_number = card_number
         self.count = card_json.get("count", 1)
+        self.name = None  # Resolved later via API if needed
 
     def __repr__(self):
         return f"{self.count}x {self.card_set}_{self.card_number}"

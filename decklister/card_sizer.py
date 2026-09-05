@@ -10,7 +10,7 @@ class CardSizer:
     DEFAULT_ASPECT_RATIO = 5.0 / 7.0  # width / height
 
     @staticmethod
-    def calculate(area, card_count, padding=3, aspect_ratio=None):
+    def calculate(area, card_count, padding=3, aspect_ratio=None, label_height=0, label_width=0):
         """
         Given a rectangular area and a number of cards, find the largest card
         size that fits all cards in a grid layout.
@@ -20,6 +20,8 @@ class CardSizer:
             card_count: Number of cards to place.
             padding: Space between cards in pixels.
             aspect_ratio: Card width / height ratio. Defaults to 5/7.
+            label_height: Extra vertical space per card for labels (above/below).
+            label_width: Extra horizontal space per card for labels (left/right).
 
         Returns:
             (card_width, card_height, cols, rows, padding) or None if card_count is 0.
@@ -44,10 +46,10 @@ class CardSizer:
         for cols in range(1, card_count + 1):
             rows = math.ceil(card_count / cols)
 
-            # Max card width given available width and padding between columns
-            max_w = (avail_width - (cols - 1) * padding) / cols
-            # Max card height given available height and padding between rows
-            max_h = (avail_height - (rows - 1) * padding) / rows
+            # Max card width given available width, padding, and label width
+            max_w = (avail_width - (cols - 1) * padding - cols * label_width) / cols
+            # Max card height given available height, padding, and label height
+            max_h = (avail_height - (rows - 1) * padding - rows * label_height) / rows
 
             if max_w <= 0 or max_h <= 0:
                 continue

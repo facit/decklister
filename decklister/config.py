@@ -16,6 +16,9 @@ class Config:
         count_font=None,
         padding=3,
         uniform_card_size=True,
+        card_names=None,
+        transparent_background=False,
+        show_counts=True,
     ):
         self.resolution = tuple(resolution)
         self.layers = layers or []
@@ -29,6 +32,10 @@ class Config:
         self.count_font = count_font
         self.padding = padding
         self.uniform_card_size = uniform_card_size
+        # card_names: {"enabled": bool, "position": str, "font": str, "size": int, "color": list}
+        self.card_names = card_names or {"enabled": False, "position": "below", "size": 14, "color": [255, 255, 255]}
+        self.transparent_background = transparent_background
+        self.show_counts = show_counts
 
     @classmethod
     def from_file(cls, path):
@@ -82,4 +89,7 @@ class Config:
             count_font=data.get("count_font"),
             padding=data.get("padding", 3),
             uniform_card_size=data.get("uniform_card_size", True),
+            card_names=data.get("card_names"),
+            transparent_background=data.get("transparent_background", False),
+            show_counts=data.get("show_counts", True),
         )

@@ -1,3 +1,4 @@
 Pillow
 requests
 PySide6
+PyInstaller
