@@ -17,7 +17,7 @@ Usage:
 import argparse
 import json
 
-import decklister.image_downloader as idl
+import swuscan_manifest as idl
 
 
 def foil_keys(node, path=""):
