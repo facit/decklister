@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 import time
 import shutil
@@ -281,6 +282,37 @@ def _get_with_retries(session, url, **kwargs):
     raise last_err
 
 
+def _report_page_progress(page, total_pages, card_count, start_time):
+    """Show that the page-fetch loop is still alive.
+
+    Each page is one HTTP round trip (up to REQUEST_TIMEOUT seconds, more with
+    retries) and there can be hundreds of them, so the loop used to go silent
+    for minutes. On a terminal this redraws a single progress line; piped or
+    redirected output instead gets an occasional plain line, so a log file
+    doesn't fill up with hundreds of near-duplicate rows.
+    """
+    elapsed = time.time() - start_time
+    rate = page / elapsed if elapsed > 0 else 0
+    eta = (total_pages - page) / rate if rate > 0 else 0
+    done = page >= total_pages
+
+    if sys.stdout.isatty():
+        width = 30
+        filled = int(width * page / total_pages) if total_pages else width
+        bar = "#" * filled + "-" * (width - filled)
+        sys.stdout.write(f"\r  [{bar}] page {page}/{total_pages}  "
+                          f"{card_count} card(s)  eta {eta:.0f}s   ")
+        sys.stdout.flush()
+        if done:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+    else:
+        step = max(1, total_pages // 20)   # ~20 updates over the whole run
+        if done or page % step == 0:
+            print(f"  page {page}/{total_pages}  {card_count} card(s)  "
+                  f"eta {eta:.0f}s")
+
+
 def _fetch_manifest_from_api():
     """Page through the official card-list API and build a lookup of
     "SET/STEM" -> {"front", "back", "type", "serial", "double_sided"}.
@@ -298,6 +330,7 @@ def _fetch_manifest_from_api():
 
     page = 1
     total_pages = None
+    start_time = time.time()
     while True:
         params = {
             "locale": "en",
@@ -352,6 +385,8 @@ def _fetch_manifest_from_api():
                 "is_variant": bool(_unwrap(attrs.get("variantOf"))),
                 "card_count": attrs.get("cardCount"),    # the printed "/M"; identifies the logical set
             })
+
+        _report_page_progress(page, total_pages, len(collected), start_time)
 
         if page >= total_pages:
             break
