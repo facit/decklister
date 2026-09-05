@@ -134,16 +134,33 @@ GET https://swudb.com/api/search/IG-11%20title%3A%22I%20Cannot%20Be%20Captured%2
 
 ### Image URLs
 
-Card images are served from `https://swudb.com/cards/{SET}/{NUMBER}.png`:
+Card images are served from `https://swudb.com/images/cards/{SET}/{NUMBER}.png`:
 
 ```
-https://swudb.com/cards/SHD/170.png       ← normal art
-https://swudb.com/cards/SHD/170-h.png     ← hyperspace art (suffix -h)
-https://swudb.com/cards/SOR/001-portrait.png  ← back face of double-sided card
+https://swudb.com/images/cards/SHD/170.png       ← normal art
 ```
 
-The `frontImagePath` field in the response uses `~/cards/...` — replace `~` with
-`https://swudb.com` to get the full URL.
+Confirmed via `curl -I`: `.../images/cards/SOR/001.png` returns `200`, while the
+previously-documented `https://swudb.com/cards/SOR/001.png` (no `/images/`) returns
+`404`.
+
+The `frontImagePath` field in the response is believed to use `~/cards/...` — if so,
+replace `~` with `https://swudb.com/images` (not `https://swudb.com`) to get a working
+URL. **Unverified** — nothing in this codebase actually consumes `frontImagePath`, so
+this hasn't been checked against a live response.
+
+**Unverified** (carried over from the previous version of this doc, written against
+the wrong base path above — these may also be stale):
+
+```
+https://swudb.com/images/cards/SHD/170-h.png     ← hyperspace art? (suffix -h)
+https://swudb.com/images/cards/SOR/001-portrait.png  ← back face of double-sided card?
+```
+
+Note this project's own variant handling (`variant_resolver.py`) does *not* use these
+suffixes — it resolves hyperspace/showcase variants to a different numeric card number
+within the same set instead. Whether the `-h`/`-portrait` suffix scheme also works is
+unconfirmed.
 
 ---
 
