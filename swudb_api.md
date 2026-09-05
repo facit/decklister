@@ -130,37 +130,39 @@ GET https://swudb.com/api/search/IG-11%20title%3A%22I%20Cannot%20Be%20Captured%2
 | `rarity`                | `1` = Common, `2` = Uncommon, `3` = Rare, `4` = Legendary, `5` = Special |
 | `arena`                 | `0` = Ground, `1` = Space                                        |
 | `traits`                | Comma-separated trait list, e.g. `"Bounty Hunter,Droid"`         |
-| `frontImagePath`        | Image path; replace `~` with `https://swudb.com` for full URL    |
+| `frontImagePath`        | Image path; replace `~` with `https://swudb.com/images` for full URL |
 
 ### Image URLs
 
 Card images are served from `https://swudb.com/images/cards/{SET}/{NUMBER}.png`:
 
 ```
-https://swudb.com/images/cards/SHD/170.png       ← normal art
+https://swudb.com/images/cards/SHD/170.png              ← normal art
+https://swudb.com/images/cards/SOR/001-portrait.png      ← back face of double-sided card
 ```
 
-Confirmed via `curl -I`: `.../images/cards/SOR/001.png` returns `200`, while the
-previously-documented `https://swudb.com/cards/SOR/001.png` (no `/images/`) returns
-`404`.
+Confirmed via `curl -I`:
+- `.../images/cards/SOR/001.png` → `200`
+- `.../images/cards/SOR/001-portrait.png` → `200`
+- `https://swudb.com/cards/SOR/001.png` (no `/images/`, the old version of this doc)
+  → `404`
 
-The `frontImagePath` field in the response is believed to use `~/cards/...` — if so,
-replace `~` with `https://swudb.com/images` (not `https://swudb.com`) to get a working
-URL. **Unverified** — nothing in this codebase actually consumes `frontImagePath`, so
-this hasn't been checked against a live response.
-
-**Unverified** (carried over from the previous version of this doc, written against
-the wrong base path above — these may also be stale):
+Confirmed via a live search response for `IG-11 title:"I Cannot Be Captured"`:
+`frontImagePath` is literally `~/cards/SHD/170.png` — substituting `~` with
+`https://swudb.com/images` gives `https://swudb.com/images/cards/SHD/170.png`, which
+is the working URL above.
 
 ```
 https://swudb.com/images/cards/SHD/170-h.png     ← hyperspace art? (suffix -h)
-https://swudb.com/images/cards/SOR/001-portrait.png  ← back face of double-sided card?
 ```
 
-Note this project's own variant handling (`variant_resolver.py`) does *not* use these
-suffixes — it resolves hyperspace/showcase variants to a different numeric card number
-within the same set instead. Whether the `-h`/`-portrait` suffix scheme also works is
-unconfirmed.
+**Unconfirmed.** `curl -I` on this returns `404` for SHD/170 (IG-11), but that's not
+conclusive — this specific card may simply have no hyperspace printing, rather than
+the `-h` suffix scheme itself being wrong. Untested against a card known to have a
+hyperspace variant. Note this project's own variant handling (`variant_resolver.py`)
+doesn't use this suffix at all — it resolves hyperspace/showcase variants to a
+different numeric card number within the same set instead, so this project has no
+current dependency on the `-h` suffix working.
 
 ---
 
