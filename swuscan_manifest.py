@@ -164,14 +164,18 @@ def _rate_limit_download(url):
         pass
 
 
-# A 403 from this CDN means "you are being blocked" (bot/rate-limit
-# protection), not "this file doesn't exist" — that's a 404. Seeing several
-# in a row means our own traffic likely triggered it, and the correct
-# response is to stop immediately, not keep retrying into more of the same
-# block. CDN_FORBIDDEN_TRIP_THRESHOLD consecutive 403s (across every thread,
-# probes and downloads alike) trips a breaker that short-circuits every
-# further CDN request for the rest of this run.
-CDN_FORBIDDEN_TRIP_THRESHOLD = 5
+# A 403 from this CDN usually means "you are being blocked" (bot/rate-limit
+# protection), not "this file doesn't exist" — that's normally a 404. BUT: a
+# real run showed a small, consistent cluster of ~12 Hyperspace/Showcase
+# leader-variant assets (and their thumbnails) 403ing on every attempt while
+# thousands of surrounding cards downloaded fine — those look like assets
+# that are genuinely restricted on the CDN for some reason of their own, not
+# evidence we're being blocked. A low threshold treated that normal cluster
+# as a full block and aborted an otherwise-successful run. Kept high enough
+# to absorb a cluster like that, while a REAL block (which failed on
+# hundreds of cards straight through) still trips it well before running out
+# of catalog.
+CDN_FORBIDDEN_TRIP_THRESHOLD = 40
 
 _cdn_breaker_lock = threading.Lock()
 _cdn_consecutive_forbidden = 0
@@ -179,18 +183,20 @@ _cdn_breaker_tripped = False
 
 
 class CDNBlocked(Exception):
-    """The CDN appears to be actively blocking us (repeated 403 Forbidden)."""
+    """A long run of consecutive 403s — a real block, not a normal handful of
+    permanently-restricted assets (see CDN_FORBIDDEN_TRIP_THRESHOLD)."""
 
 
 def _check_cdn_breaker():
     if _cdn_breaker_tripped:
         raise CDNBlocked(
-            "the CDN returned 403 Forbidden repeatedly earlier in this run — "
-            "it looks like our requests are being blocked, not that assets "
-            "are missing. Stopping instead of continuing to hammer it. Wait "
-            "a while before retrying; consider lowering "
-            "CDN_PROBE_REQUESTS_PER_SECOND / CDN_DOWNLOAD_REQUESTS_PER_SECOND "
-            "if it keeps happening."
+            f"the CDN returned {CDN_FORBIDDEN_TRIP_THRESHOLD}+ consecutive 403 "
+            "Forbidden responses earlier in this run — that's well past what a "
+            "handful of individually-restricted assets would produce, so this "
+            "looks like our requests being blocked outright. Stopping instead "
+            "of continuing to hammer it. Wait a while before retrying; "
+            "consider lowering CDN_PROBE_REQUESTS_PER_SECOND / "
+            "CDN_DOWNLOAD_REQUESTS_PER_SECOND if it keeps happening."
         )
 
 
@@ -204,8 +210,9 @@ def _record_cdn_response(status_code):
             if _cdn_consecutive_forbidden >= CDN_FORBIDDEN_TRIP_THRESHOLD and not _cdn_breaker_tripped:
                 _cdn_breaker_tripped = True
                 print(f"\n  ! Got {_cdn_consecutive_forbidden} consecutive 403 Forbidden "
-                      f"responses from the CDN — it looks like we're being blocked, not "
-                      f"that assets are missing. Stopping further CDN requests.\n")
+                      f"responses from the CDN — well past a normal cluster of "
+                      f"individually-restricted assets, so this looks like we're being "
+                      f"blocked outright. Stopping further CDN requests.\n")
         else:
             _cdn_consecutive_forbidden = 0
 
