@@ -141,25 +141,9 @@ https://swudb.com/images/cards/SHD/170.png              ← normal art
 https://swudb.com/images/cards/SOR/001-portrait.png      ← back face of double-sided card
 ```
 
-Confirmed via `curl -I`:
-- `.../images/cards/SOR/001.png` → `200`
-- `.../images/cards/SOR/001-portrait.png` → `200`
-- `https://swudb.com/cards/SOR/001.png` (no `/images/`, the old version of this doc)
-  → `404`
-
-Confirmed via a live search response for `IG-11 title:"I Cannot Be Captured"`:
-`frontImagePath` is literally `~/cards/SHD/170.png` — substituting `~` with
-`https://swudb.com/images` gives `https://swudb.com/images/cards/SHD/170.png`, which
-is the working URL above.
-
-**There is no `-h` suffix for hyperspace art.** A previous version of this doc claimed
-`https://swudb.com/cards/SHD/170-h.png` served the hyperspace variant of a card — this
-was hallucinated (fabricated by an earlier Claude session with no actual basis) and is
-wrong. It was tested and 404s; more importantly, IG-11 (SHD 170) *does* have a
-hyperspace printing, so a real suffix scheme would have returned it. Hyperspace (and
-showcase) variants are separate printings with their own card numbers within the same
-set — see `variant_resolver.py`, which resolves them by computing that numeric offset,
-not by appending a suffix. Use that scheme, not a URL suffix, to fetch variant art.
+Hyperspace and showcase variants are separate printings with their own card number
+within the same set, not a URL suffix — see `variant_resolver.py`, which resolves the
+numeric offset for a given variant.
 
 ---
 
