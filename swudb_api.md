@@ -130,20 +130,20 @@ GET https://swudb.com/api/search/IG-11%20title%3A%22I%20Cannot%20Be%20Captured%2
 | `rarity`                | `1` = Common, `2` = Uncommon, `3` = Rare, `4` = Legendary, `5` = Special |
 | `arena`                 | `0` = Ground, `1` = Space                                        |
 | `traits`                | Comma-separated trait list, e.g. `"Bounty Hunter,Droid"`         |
-| `frontImagePath`        | Image path; replace `~` with `https://swudb.com` for full URL    |
+| `frontImagePath`        | Image path; replace `~` with `https://swudb.com/images` for full URL |
 
 ### Image URLs
 
-Card images are served from `https://swudb.com/cards/{SET}/{NUMBER}.png`:
+Card images are served from `https://swudb.com/images/cards/{SET}/{NUMBER}.png`:
 
 ```
-https://swudb.com/cards/SHD/170.png       ← normal art
-https://swudb.com/cards/SHD/170-h.png     ← hyperspace art (suffix -h)
-https://swudb.com/cards/SOR/001-portrait.png  ← back face of double-sided card
+https://swudb.com/images/cards/SHD/170.png              ← normal art
+https://swudb.com/images/cards/SOR/001-portrait.png      ← back face of double-sided card
 ```
 
-The `frontImagePath` field in the response uses `~/cards/...` — replace `~` with
-`https://swudb.com` to get the full URL.
+Hyperspace and showcase variants are separate printings with their own card number
+within the same set, not a URL suffix — see `variant_resolver.py`, which resolves the
+numeric offset for a given variant.
 
 ---
 
