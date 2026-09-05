@@ -351,6 +351,9 @@ def _png_dimensions_from_header(data):
     return (width, height)
 
 
+_dim_cache_lock = threading.Lock()
+
+
 def _probe_dimensions(session, url, dim_cache):
     """Measure an image's pixel dimensions without downloading it in full.
 
@@ -359,9 +362,13 @@ def _probe_dimensions(session, url, dim_cache):
     fallback (via Pillow) only exists for a format that never showed up in
     what we've seen. Results are cached on disk by URL so a repeat manifest
     build never re-probes the same asset, and every CDN hit — probe or full
-    download alike — goes through the shared rate limiter.
+    download alike — goes through the shared rate limiter. Called from a
+    thread pool (see _pick_best_in_group), so the cache dict itself is
+    guarded by a lock — cheap, since each probe holds it only long enough
+    to read or write one entry.
     """
-    cached = dim_cache.get(url)
+    with _dim_cache_lock:
+        cached = dim_cache.get(url)
     if cached is not None:
         return tuple(cached)
 
@@ -381,23 +388,33 @@ def _probe_dimensions(session, url, dim_cache):
         print(f"  Warning: could not measure {url}: {e}")
         return None
 
-    dim_cache[url] = list(dims)
+    with _dim_cache_lock:
+        dim_cache[url] = list(dims)
     return dims
 
 
-def _pick_best_in_group(session, urls, dim_cache):
+def _pick_best_in_group(pool, session, urls, dim_cache):
     """From same-hash size variants of one image, return the (url, dims)
     with the largest MEASURED pixel area. Never infers "the original" from
     an absence of known prefix — file size doesn't reliably track
-    resolution here, so every candidate gets measured."""
+    resolution here, so every candidate gets measured.
+
+    Probes run concurrently on `pool` rather than one at a time: each is a
+    blocking network round trip, and a card can have 7-8 variants per face
+    (more for a two-faced leader) — done sequentially that's several
+    seconds of pure wait per card. The shared rate limiter still caps how
+    fast requests actually go out; this only removes the extra serialization
+    on top of that cap.
+    """
+    futures = {pool.submit(_probe_dimensions, session, url, dim_cache): url for url in urls}
     best_url, best_dims, best_area = None, None, -1
-    for url in urls:
-        dims = _probe_dimensions(session, url, dim_cache)
+    for future in as_completed(futures):
+        dims = future.result()
         if dims is None:
             continue
         area = dims[0] * dims[1]
         if area > best_area:
-            best_url, best_dims, best_area = url, dims, area
+            best_url, best_dims, best_area = futures[future], dims, area
     if best_url is None:
         # Every probe failed (network hiccup, unrecognized format) — keep
         # some URL rather than dropping the card's art entirely.
@@ -405,7 +422,7 @@ def _pick_best_in_group(session, urls, dim_cache):
     return best_url, best_dims
 
 
-def _extract_card_art(attrs, session, dim_cache):
+def _extract_card_art(attrs, pool, session, dim_cache):
     """Find this card's front/back art by scanning its ENTIRE record for
     image URLs — not specific fields, not a known format-prefix list.
     Same-hash size variants are grouped and reduced to the largest by
@@ -423,7 +440,7 @@ def _extract_card_art(attrs, session, dim_cache):
 
     best = {"front": (None, None, -1), "back": (None, None, -1)}
     for urls in _group_candidates_by_hash(candidates).values():
-        url, dims = _pick_best_in_group(session, urls, dim_cache)
+        url, dims = _pick_best_in_group(pool, session, urls, dim_cache)
         area = (dims[0] * dims[1]) if dims else 0
         name = os.path.basename(urlsplit(url).path).lower()
         role = "back" if LEADER_UNIT_MARKER in name else "front"
@@ -616,6 +633,7 @@ def _fetch_manifest_from_api():
     total_cards = None
     processed = 0
     start_time = time.time()
+    pool = ThreadPoolExecutor(max_workers=MAX_WORKERS)   # shared across every card's dimension probes
     try:
         while True:
             params = {
@@ -648,7 +666,7 @@ def _fetch_manifest_from_api():
                 if not set_code or number is None:
                     continue
 
-                front, front_dims, back, back_dims = _extract_card_art(attrs, session, dim_cache)
+                front, front_dims, back, back_dims = _extract_card_art(attrs, pool, session, dim_cache)
                 if not front:
                     continue
                 if back and back != front:           # ignore a back that just echoes the front
@@ -684,6 +702,7 @@ def _fetch_manifest_from_api():
                 break
             page += 1
     finally:
+        pool.shutdown(wait=True)   # let any in-flight probes finish before saving what they found
         _save_dimension_cache(dim_cache)   # keep whatever we measured even on an early exit
 
     return _build_manifest(collected, back_counts, set_settings)
