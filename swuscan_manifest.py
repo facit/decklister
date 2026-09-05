@@ -1288,6 +1288,8 @@ def download_manifest_keys(keys, manifest, refresh=False):
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {}
         for key in keys:
+            if _cdn_breaker_tripped:
+                break   # stop queueing new work — already-blocked doesn't need thousands more attempts
             card_set, stem = key.split("/", 1)
             futures[executor.submit(
                 download_card, card_set, stem,
@@ -1308,6 +1310,8 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     Returns 1 if the front was downloaded, 0 if already present, -1 if not
     found / failed.
     """
+    _check_cdn_breaker()   # fail fast and silently — no point even logging this attempt
+
     if manifest is None:
         manifest = get_card_manifest()
 
@@ -1326,7 +1330,6 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     if not os.path.isfile(front_path):
         print(f"Downloading {card_set} #{stem}...")
         try:
-            _check_cdn_breaker()
             _rate_limit_download(entry["front"])
             resp = requests.get(entry["front"], headers=CDN_HEADERS,
                                 allow_redirects=True, timeout=30)
@@ -1397,13 +1400,14 @@ def download_images_batch(cards):
 
     print(f"Downloading {len(to_download)} card image(s)...")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(
+        futures = {}
+        for card_set, card_number in to_download:
+            if _cdn_breaker_tripped:
+                break   # stop queueing new work — already-blocked doesn't need thousands more attempts
+            futures[executor.submit(
                 download_card, card_set, card_number,
                 os.path.join(_images_dir(), str(card_set)), manifest
-            ): (card_set, card_number)
-            for card_set, card_number in to_download
-        }
+            )] = (card_set, card_number)
         _drain_download_futures(futures, lambda f: "{} #{}".format(*futures[f]))
 
 
@@ -1438,11 +1442,12 @@ def download_images(card_set, card_number=None):
 
     print(f"Downloading {len(set_keys)} card(s) for {card_set}...")
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {
-            executor.submit(download_card, card_set,
-                            key.split("/", 1)[1], output_dir, manifest): key
-            for key in set_keys
-        }
+        futures = {}
+        for key in set_keys:
+            if _cdn_breaker_tripped:
+                break   # stop queueing new work — already-blocked doesn't need thousands more attempts
+            futures[executor.submit(download_card, card_set,
+                                    key.split("/", 1)[1], output_dir, manifest)] = key
         _drain_download_futures(futures, lambda f: futures[f])
 
 
@@ -1467,6 +1472,8 @@ def download_all_images():
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
         futures = {}
         for key in manifest:
+            if _cdn_breaker_tripped:
+                break   # stop queueing new work — already-blocked doesn't need thousands more attempts
             card_set, stem = key.split("/", 1)
             output_dir = os.path.join(_images_dir(), card_set)
             futures[executor.submit(download_card, card_set, stem,
