@@ -83,10 +83,13 @@ LEADER_UNIT_MARKER = "leader_unit"   # deployed leader face -> back
 
 DIMENSION_CACHE_FILENAME = "image_dimensions_cache.json"   # url -> [width, height]
 
-# Requests/second shared across every thread hitting the CDN (dimension
-# probes AND full downloads) — this is someone else's infrastructure, not
-# ours, so concurrency (MAX_WORKERS) must not translate into a burst.
-CDN_REQUESTS_PER_SECOND = 20
+# Requests/second shared across every thread hitting the CDN — kept as two
+# separate budgets because a dimension probe (a 24-byte Range read) costs
+# the server almost nothing, while a full image download is real bandwidth.
+# Both are still a single shared budget per kind, not one each: concurrency
+# (MAX_WORKERS) must not translate into a burst against either.
+CDN_PROBE_REQUESTS_PER_SECOND = 50
+CDN_DOWNLOAD_REQUESTS_PER_SECOND = 20
 
 
 class _RateLimiter:
@@ -110,14 +113,25 @@ class _RateLimiter:
             time.sleep(delay)
 
 
-_cdn_limiter = _RateLimiter(CDN_REQUESTS_PER_SECOND)
+_cdn_probe_limiter = _RateLimiter(CDN_PROBE_REQUESTS_PER_SECOND)
+_cdn_download_limiter = _RateLimiter(CDN_DOWNLOAD_REQUESTS_PER_SECOND)
 
 
-def _rate_limit_for(url):
-    """Pace this request if (and only if) it's headed at the CDN."""
+def _rate_limit_probe(url):
+    """Pace a dimension-probe request (tiny — a 24-byte Range read)."""
     try:
         if urlsplit(url).hostname == CDN_HOSTNAME:
-            _cdn_limiter.wait()
+            _cdn_probe_limiter.wait()
+    except ValueError:
+        pass
+
+
+def _rate_limit_download(url):
+    """Pace a full-image download — real bandwidth, kept more conservative
+    than the probe budget."""
+    try:
+        if urlsplit(url).hostname == CDN_HOSTNAME:
+            _cdn_download_limiter.wait()
     except ValueError:
         pass
 
@@ -363,23 +377,23 @@ def _probe_dimensions(session, url, dim_cache):
     what we've seen. Results are cached on disk by URL so a repeat manifest
     build never re-probes the same asset, and every CDN hit — probe or full
     download alike — goes through the shared rate limiter. Called from a
-    thread pool (see _pick_best_in_group), so the cache dict itself is
-    guarded by a lock — cheap, since each probe holds it only long enough
-    to read or write one entry.
+    thread pool (see _probe_all), so the cache dict itself is guarded by a
+    lock — cheap, since each probe holds it only long enough to read or
+    write one entry.
     """
     with _dim_cache_lock:
         cached = dim_cache.get(url)
     if cached is not None:
         return tuple(cached)
 
-    _rate_limit_for(url)
+    _rate_limit_probe(url)
     try:
         resp = session.get(url, headers={"Range": "bytes=0-23"}, timeout=REQUEST_TIMEOUT)
         if resp.status_code not in (200, 206):
             return None
         dims = _png_dimensions_from_header(resp.content)
         if dims is None:
-            _rate_limit_for(url)
+            _rate_limit_download(url)   # full fallback fetch — real bandwidth this time
             full = session.get(url, timeout=REQUEST_TIMEOUT)
             full.raise_for_status()
             with Image.open(BytesIO(full.content)) as im:
@@ -393,28 +407,37 @@ def _probe_dimensions(session, url, dim_cache):
     return dims
 
 
-def _pick_best_in_group(pool, session, urls, dim_cache):
-    """From same-hash size variants of one image, return the (url, dims)
-    with the largest MEASURED pixel area. Never infers "the original" from
-    an absence of known prefix — file size doesn't reliably track
-    resolution here, so every candidate gets measured.
+def _probe_all(pool, session, urls, dim_cache):
+    """Measure every URL in `urls` concurrently on `pool`, regardless of
+    which hash-group each belongs to, and return {url: dims-or-None}.
 
-    Probes run concurrently on `pool` rather than one at a time: each is a
-    blocking network round trip, and a card can have 7-8 variants per face
-    (more for a two-faced leader) — done sequentially that's several
-    seconds of pure wait per card. The shared rate limiter still caps how
-    fast requests actually go out; this only removes the extra serialization
-    on top of that cap.
+    Submitting a card's ENTIRE candidate pool at once — front group and
+    back group together — matters as much as the concurrency itself: two
+    groups measured one after another still stacks two full rounds of
+    waiting, even though the shared rate limiter has room to interleave
+    them. One batch means one round of waiting per card, not one per face.
     """
     futures = {pool.submit(_probe_dimensions, session, url, dim_cache): url for url in urls}
-    best_url, best_dims, best_area = None, None, -1
+    results = {}
     for future in as_completed(futures):
-        dims = future.result()
+        results[futures[future]] = future.result()
+    return results
+
+
+def _pick_best(urls, dims_by_url):
+    """From same-hash size variants of one image (already measured — see
+    _probe_all), return the (url, dims) with the largest pixel area. Never
+    infers "the original" from an absence of known prefix — file size
+    doesn't reliably track resolution here, so every candidate is measured
+    rather than assumed."""
+    best_url, best_dims, best_area = None, None, -1
+    for url in urls:
+        dims = dims_by_url.get(url)
         if dims is None:
             continue
         area = dims[0] * dims[1]
         if area > best_area:
-            best_url, best_dims, best_area = futures[future], dims, area
+            best_url, best_dims, best_area = url, dims, area
     if best_url is None:
         # Every probe failed (network hiccup, unrecognized format) — keep
         # some URL rather than dropping the card's art entirely.
@@ -438,9 +461,12 @@ def _extract_card_art(attrs, pool, session, dim_cache):
     if not candidates:
         return None, None, None, None
 
+    groups = _group_candidates_by_hash(candidates)
+    dims_by_url = _probe_all(pool, session, candidates, dim_cache)
+
     best = {"front": (None, None, -1), "back": (None, None, -1)}
-    for urls in _group_candidates_by_hash(candidates).values():
-        url, dims = _pick_best_in_group(pool, session, urls, dim_cache)
+    for urls in groups.values():
+        url, dims = _pick_best(urls, dims_by_url)
         area = (dims[0] * dims[1]) if dims else 0
         name = os.path.basename(urlsplit(url).path).lower()
         role = "back" if LEADER_UNIT_MARKER in name else "front"
@@ -1206,7 +1232,7 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     if not os.path.isfile(front_path):
         print(f"Downloading {card_set} #{stem}...")
         try:
-            _rate_limit_for(entry["front"])
+            _rate_limit_download(entry["front"])
             resp = requests.get(entry["front"], headers=API_HEADERS,
                                 allow_redirects=True, timeout=30)
             resp.raise_for_status()
@@ -1221,7 +1247,7 @@ def download_card(card_set, card_number, output_dir, manifest=None):
     # gives back art to in the future).
     if back_url and not os.path.isfile(back_path):
         try:
-            _rate_limit_for(back_url)
+            _rate_limit_download(back_url)
             resp = requests.get(back_url, headers=API_HEADERS,
                                 allow_redirects=True, timeout=30)
             resp.raise_for_status()
